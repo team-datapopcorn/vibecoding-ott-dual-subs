@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #e53935, #c62828);
+      padding: 14px 16px;
+      text-align: center;
+    }
+    .header h1 { font-size: 15px; font-weight: 700; color: #fff; }
+    .header p { font-size: 11px; color: rgba(255,255,255,0.75); margin-top: 3px; }
+
+    .content { padding: 12px; }
+
+    /* 상태 표시 */
+    .status-bar {
+      display: flex; align-items: center; gap: 8px;
+      background: #16213e; border: 1px solid #2a2a4a;
+      border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+    }
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-dot.active { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+    .status-dot.inactive { background: #666; }
+    .status-bar .text { font-size: 13px; flex: 1; }
+    .status-bar .count { font-size: 12px; color: #888; }
+
+    /* 메인 토글 */
+    .toggle-card {
+      background: #16213e; border: 1px solid #2a2a4a;
+      border-radius: 10px; padding: 16px;
+      margin-bottom: 12px;
+    }
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .toggle-row .label { font-size: 16px; font-weight: 700; }
+    .switch { position: relative; width: 52px; height: 28px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: #444; border-radius: 28px; transition: 0.3s;
+    }
+    .slider::before {
+      content: ""; position: absolute;
+      height: 22px; width: 22px; left: 3px; bottom: 3px;
+      background: #fff; border-radius: 50%; transition: 0.3s;
+    }
+    input:checked + .slider { background: #e53935; }
+    input:checked + .slider::before { transform: translateX(24px); }
+
+    /* 자막 프리뷰 */
+    .preview-box {
+      background: #0d1117; border-radius: 8px;
+      padding: 14px; margin-top: 12px; text-align: center;
+      min-height: 60px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 4px;
+    }
+    .preview-en {
+      font-size: 14px; color: #FFD54F; font-weight: 500;
+      font-style: italic;
+    }
+    .preview-ko {
+      font-size: 16px; color: #fff; font-weight: 600;
+    }
+    .preview-off {
+      font-size: 13px; color: #555;
+    }
+
+    /* 설정 섹션 */
+    .section-title {
+      font-size: 11px; color: #666; font-weight: 600;
+      margin: 12px 0 8px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+
+    .settings-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .setting-item {
+      background: #16213e; border: 1px solid #2a2a4a;
+      border-radius: 8px; padding: 10px;
+    }
+    .setting-item .label {
+      font-size: 10px; color: #888; margin-bottom: 4px;
+    }
+    .setting-item select, .setting-item input[type="range"] {
+      width: 100%; background: #0d1117; color: #e0e0e0;
+      border: 1px solid #333; border-radius: 4px;
+      padding: 4px 6px; font-size: 12px;
+      cursor: pointer;
+    }
+    .setting-item select:focus { outline: 1px solid #e53935; }
+    input[type="range"] {
+      -webkit-appearance: none; height: 4px;
+      background: #333; border-radius: 2px; border: none; padding: 0;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px;
+      background: #e53935; border-radius: 50%; cursor: pointer;
+    }
+    .size-value { font-size: 11px; color: #aaa; text-align: right; margin-top: 2px; }
+
+    /* 다운로드 접기 */
+    .collapsible {
+      background: #16213e; border: 1px solid #2a2a4a;
+      border-radius: 8px; margin-top: 12px; overflow: hidden;
+    }
+    .collapsible-header {
+      padding: 10px 14px; cursor: pointer; font-size: 12px;
+      color: #888; display: flex; align-items: center;
+      justify-content: space-between;
+    }
+    .collapsible-header:hover { color: #aaa; }
+    .collapsible-body {
+      max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+    }
+    .collapsible-body.open { max-height: 400px; }
+    .collapsible-body .inner { padding: 0 14px 12px; }
+
+    .dl-btn {
+      display: block; width: 100%; padding: 7px; margin-top: 6px;
+      border: 1px solid #333; border-radius: 6px;
+      background: transparent; color: #aaa;
+      font-size: 11px; cursor: pointer; text-align: center;
+      transition: all 0.15s;
+    }
+    .dl-btn:hover { border-color: #e53935; color: #fff; }
+
+    .footer {
+      text-align: center; padding: 8px;
+      font-size: 10px; color: #444; border-top: 1px solid #2a2a4a;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>OTT 이중자막</h1>
+    <p>한국어 + 영어 자막을 동시에 표시</p>
+  </div>
+
+  <div class="content">
+    <!-- 감지 상태 -->
+    <div class="status-bar" id="status-bar">
+      <div class="status-dot inactive" id="status-dot"></div>
+      <span class="text" id="status-text">자막 감지 대기 중...</span>
+      <span class="count" id="status-count"></span>
+    </div>
+
+    <!-- 이중자막 ON/OFF -->
+    <div class="toggle-card">
+      <div class="toggle-row">
+        <span class="label">이중자막</span>
+        <label class="switch">
+          <input type="checkbox" id="dual-sub-toggle" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="preview-box" id="preview-box">
+        <div class="preview-en">English subtitle here</div>
+        <div class="preview-ko">한국어 자막이 여기에 표시됩니다</div>
+      </div>
+    </div>
+
+    <!-- 자막 설정 -->
+    <div class="section-title">자막 설정</div>
+    <div class="settings-grid">
+      <div class="setting-item">
+        <div class="label">영어 자막 크기</div>
+        <input type="range" id="en-size" min="12" max="28" value="18">
+        <div class="size-value" id="en-size-val">18px</div>
+      </div>
+      <div class="setting-item">
+        <div class="label">한국어 자막 크기</div>
+        <input type="range" id="ko-size" min="12" max="28" value="20">
+        <div class="size-value" id="ko-size-val">20px</div>
+      </div>
+      <div class="setting-item">
+        <div class="label">영어 자막 색상</div>
+        <select id="en-color">
+          <option value="#FFD54F" selected>노란색</option>
+          <option value="#81D4FA">하늘색</option>
+          <option value="#A5D6A7">연두색</option>
+          <option value="#CE93D8">보라색</option>
+          <option value="#FFFFFF">흰색</option>
+        </select>
+      </div>
+      <div class="setting-item">
+        <div class="label">자막 위치</div>
+        <select id="sub-position">
+          <option value="bottom" selected>하단</option>
+          <option value="top">상단</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 다운로드 (접을 수 있음) -->
+    <div class="collapsible">
+      <div class="collapsible-header" id="dl-header">
+        자막 파일 다운로드 <span id="dl-arrow">▸</span>
+      </div>
+      <div class="collapsible-body" id="dl-body">
+        <div class="inner" id="dl-list">
+          <!-- 동적으로 채워짐 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">v2.0 · 쿠팡플레이 / 넷플릭스 지원</div>
+
+  <script src="converter.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
