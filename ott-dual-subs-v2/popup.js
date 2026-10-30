@@ -16,6 +16,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   const dlArrow = document.getElementById('dl-arrow');
   const dlList = document.getElementById('dl-list');
 
+  // --- 저장된 자막 설정 반영 (다음 편에도 같은 크기·색·위치) ---
+  try {
+    const saved = await chrome.storage.local.get('dualSettings');
+    const st = saved.dualSettings;
+    if (st) {
+      if (st.enFontSize) { enSizeSlider.value = st.enFontSize; enSizeVal.textContent = st.enFontSize + 'px'; }
+      if (st.koFontSize) { koSizeSlider.value = st.koFontSize; koSizeVal.textContent = st.koFontSize + 'px'; }
+      if (st.enColor) enColorSelect.value = st.enColor;
+      if (st.position) subPositionSelect.value = st.position;
+    }
+  } catch {}
+
   // --- 현재 탭 ---
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -124,15 +136,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   function sendSettings() {
-    chrome.tabs.sendMessage(tab.id, {
-      type: 'UPDATE_SETTINGS',
-      settings: {
-        enFontSize: parseInt(enSizeSlider.value),
-        koFontSize: parseInt(koSizeSlider.value),
-        enColor: enColorSelect.value,
-        position: subPositionSelect.value,
-      },
-    });
+    const settings = {
+      enFontSize: parseInt(enSizeSlider.value),
+      koFontSize: parseInt(koSizeSlider.value),
+      enColor: enColorSelect.value,
+      position: subPositionSelect.value,
+    };
+    chrome.storage.local.set({ dualSettings: settings });
+    chrome.tabs.sendMessage(tab.id, { type: 'UPDATE_SETTINGS', settings }, () => void chrome.runtime.lastError);
   }
 
   // --- 다운로드 섹션 접기/펼치기 ---

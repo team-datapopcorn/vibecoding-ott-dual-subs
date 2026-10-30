@@ -52,12 +52,43 @@
   let lastKnownHref = location.href;
 
   // === 설정 (기본값) ===
+  // 2026-10: 기본 글씨를 키움(영어 18→26, 한국어 20→30). 사용자가 바꾼 값은 저장해 다음 편에도 쓴다.
   let settings = {
-    enFontSize: 18,
-    koFontSize: 20,
+    enFontSize: 26,
+    koFontSize: 30,
     enColor: '#FFD54F',
     position: 'bottom',
   };
+
+  // 저장된 설정과 "이중자막 켜 둠" 상태를 불러온다. 켜 둔 상태면 다음 편·새로고침에도 자동으로 켠다.
+  let autoEnable = false;
+  try {
+    chrome.storage.local.get(['dualSettings', 'dualEnabled'], (saved) => {
+      saved = saved || {};
+      if (saved.dualSettings) { settings = { ...settings, ...saved.dualSettings }; applySettings(); }
+      autoEnable = saved.dualEnabled === true;
+      if (autoEnable) tryAutoEnable('stored');
+    });
+  } catch {}
+
+  function saveEnabled(value) {
+    autoEnable = value;
+    try { chrome.storage.local.set({ dualEnabled: value }); } catch {}
+  }
+
+  let autoEnabling = false;
+  async function tryAutoEnable(reason) {
+    if (!autoEnable || isEnabled || autoEnabling) return;
+    autoEnabling = true;
+    try {
+      if (await ensureSubtitleSources()) {
+        console.log(`[이중자막][${PLATFORM}] 자동 켜기 (${reason})`);
+        await enableDualSubs();
+        const dualOpt = document.getElementById('dual-sub-option');
+        if (dualOpt) applyActiveStyle(dualOpt);
+      }
+    } finally { autoEnabling = false; }
+  }
 
   // ------------------------------------------------------------------
   // 1) 메시지 수신 (Background / Popup → Content)
@@ -69,6 +100,8 @@
 
       if (changed && isEnabled) {
         reloadActiveSubtitles('subtitle-update').catch(() => {});
+      } else if (!isEnabled) {
+        tryAutoEnable('subtitle-detected');
       }
 
       sendResponse({ ok: true });
@@ -76,6 +109,7 @@
     }
 
     if (message.type === 'TOGGLE_DUAL_SUBS') {
+      saveEnabled(Boolean(message.enabled));
       message.enabled ? enableDualSubs() : disableDualSubs();
       sendResponse({ ok: true });
       return true;
@@ -84,6 +118,7 @@
     if (message.type === 'UPDATE_SETTINGS') {
       settings = { ...settings, ...message.settings };
       applySettings();
+      try { chrome.storage.local.set({ dualSettings: settings }); } catch {}
       sendResponse({ ok: true });
       return true;
     }
@@ -209,6 +244,7 @@
 
   function handleDualOptionClick(container) {
     if (!isEnabled) {
+      saveEnabled(true);
       enableDualSubs();
 
       if (container) {
@@ -222,6 +258,7 @@
       const dualOpt = document.getElementById('dual-sub-option');
       if (dualOpt) applyActiveStyle(dualOpt);
     } else {
+      saveEnabled(false);
       disableDualSubs();
     }
   }
@@ -619,6 +656,10 @@
       if (isEnabled) {
         createOverlay();
       }
+    }
+    if (newVideo && !newVideo.__dualSubHooked) {
+      newVideo.__dualSubHooked = true;
+      newVideo.addEventListener('playing', () => tryAutoEnable('playing'));
     }
   });
   videoObserver.observe(document.body, { childList: true, subtree: true });
