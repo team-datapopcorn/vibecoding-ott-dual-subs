@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OTT 이중자막 (Dual Subs)",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "쿠팡플레이·넷플릭스에서 한국어+영어 자막을 동시에 표시합니다. 영어 공부에 최적화된 이중자막 익스텐션.",
   "permissions": [
     "webRequest",

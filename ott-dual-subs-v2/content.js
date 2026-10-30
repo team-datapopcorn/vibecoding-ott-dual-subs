@@ -126,7 +126,8 @@
 
   function findCoupangSubtitleItems() {
     const items = [];
-    const allElements = document.querySelectorAll('div, span, li, button, p');
+    // 2026-10: 쿠팡플레이가 '자막' 제목을 <h4>로 바꿔서 제목 태그도 함께 찾는다.
+    const allElements = document.querySelectorAll('div, span, li, button, p, h1, h2, h3, h4, h5, h6');
     let sectionFound = false;
 
     for (const el of allElements) {
@@ -211,7 +212,7 @@
       enableDualSubs();
 
       if (container) {
-        container.querySelectorAll('svg, [class*="check"]').forEach((el) => {
+        container.querySelectorAll('svg, [class*="check"], img[src*="check"]').forEach((el) => {
           if (!el.closest('#dual-sub-option')) {
             el.style.visibility = 'hidden';
           }
@@ -297,6 +298,7 @@
 
       createOverlay();
       if (overlayEl) overlayEl.style.display = 'flex';
+      setNativeSubsHidden(true);
       startRendering();
     } catch (err) {
       console.error(`[이중자막][${PLATFORM}] 자막 로딩 실패:`, err);
@@ -312,6 +314,7 @@
     resetLoadedCues();
 
     if (overlayEl) overlayEl.style.display = 'none';
+    setNativeSubsHidden(false);
     if (animFrameId) {
       cancelAnimationFrame(animFrameId);
       animFrameId = null;
@@ -320,6 +323,20 @@
     const dualOpt = document.getElementById('dual-sub-option');
     if (dualOpt) dualOpt.style.color = '';
     console.log(`[이중자막][${PLATFORM}] 비활성화`);
+  }
+
+  // 이중자막을 켜면 사이트 기본 자막을 숨겨 같은 줄이 겹쳐 보이지 않게 한다.
+  function setNativeSubsHidden(hidden) {
+    const id = 'dual-sub-hide-native';
+    const existing = document.getElementById(id);
+    if (!hidden) { if (existing) existing.remove(); return; }
+    if (existing) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent = PLATFORM === 'netflix'
+      ? '.player-timedtext{visibility:hidden !important}'
+      : '.vjs-text-track-display{visibility:hidden !important}';
+    (document.head || document.documentElement).appendChild(style);
   }
 
   function applySubtitleSourceUpdate(urls, formats, reason) {
