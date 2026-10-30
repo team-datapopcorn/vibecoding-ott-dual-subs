@@ -239,6 +239,7 @@
       container.appendChild(dualOption);
     }
 
+    syncMenuChecks();
     console.log(`[이중자막][${PLATFORM}] "한국어+영어" 옵션 주입 완료`);
   }
 
@@ -336,6 +337,7 @@
       createOverlay();
       if (overlayEl) overlayEl.style.display = 'flex';
       setNativeSubsHidden(true);
+      syncMenuChecks();
       startRendering();
     } catch (err) {
       console.error(`[이중자막][${PLATFORM}] 자막 로딩 실패:`, err);
@@ -352,6 +354,7 @@
 
     if (overlayEl) overlayEl.style.display = 'none';
     setNativeSubsHidden(false);
+    syncMenuChecks();
     if (animFrameId) {
       cancelAnimationFrame(animFrameId);
       animFrameId = null;
@@ -634,7 +637,17 @@
 
   function removeCheckmark(el) {
     el.querySelectorAll('svg').forEach((svg) => svg.remove());
-    el.querySelectorAll('[class*="check"], [class*="Check"]').forEach((check) => check.remove());
+    el.querySelectorAll('[class*="check"], [class*="Check"], img[src*="check"]').forEach((check) => check.remove());
+  }
+
+  // 이중자막이 켜져 있으면 메뉴의 다른 항목 체크 표시를 숨기고, 꺼지면 되돌린다.
+  function syncMenuChecks() {
+    const dualOpt = document.getElementById('dual-sub-option');
+    if (!dualOpt || !dualOpt.parentElement) return;
+    dualOpt.parentElement.querySelectorAll('svg, [class*="check"], img[src*="check"]').forEach((el) => {
+      if (!el.closest('#dual-sub-option')) el.style.visibility = isEnabled ? 'hidden' : '';
+    });
+    dualOpt.style.color = isEnabled ? '#56CCF2' : '';
   }
 
   function applyActiveStyle(el) {
