@@ -41,6 +41,8 @@
   let koCues = [];
   let enCues = [];
   let overlayEl = null;
+  let studyController = null;
+  let studyButton = null;
   let koTextEl = null;
   let enTextEl = null;
   let videoEl = document.querySelector('video');
@@ -348,6 +350,7 @@
   }
 
   function disableDualSubs() {
+    studyController?.destroy(); studyController = null;
     isEnabled = false;
     loadRequestId += 1;
     resetLoadedCues();
@@ -402,9 +405,11 @@
   function clearOverlayText() {
     if (koTextEl) koTextEl.textContent = '';
     if (enTextEl) enTextEl.textContent = '';
+    if (studyButton) studyButton.hidden = true;
   }
 
   function resetPlaybackState(reason, resetBackground) {
+    studyController?.close();
     loadRequestId += 1;
     subtitleUrls = [];
     subtitleFormats = [];
@@ -484,6 +489,7 @@
   // 5) 오버레이 UI
   // ------------------------------------------------------------------
   function createOverlay() {
+    studyController?.destroy(); studyController = null;
     const existing = document.getElementById('dual-sub-overlay');
     if (existing) existing.remove();
 
@@ -557,6 +563,30 @@
     if (containerPos === 'static') videoContainer.style.position = 'relative';
 
     videoContainer.appendChild(overlayEl);
+    if (globalThis.OTTDualSubsStudy) {
+      studyController = globalThis.OTTDualSubsStudy.mount({
+        container: videoContainer, englishEl: enTextEl,
+        getVideo: () => videoEl,
+        getContext: (selection) => globalThis.OTTDualSubsStudy.buildContext(enCues, koCues, videoEl?.currentTime || 0, selection),
+        request: (message) => new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage(message, (response) => {
+              const failed = chrome.runtime.lastError;
+              resolve(failed ? { ok: false, message: '확장 프로그램을 다시 불러온 뒤 시도해주세요.' } : response);
+            });
+          } catch { resolve({ ok: false, message: '확장 프로그램 연결을 확인해주세요.' }); }
+        }),
+      });
+      studyButton = document.createElement('button');
+      studyButton.type = 'button'; studyButton.textContent = '표현 해설';
+      studyButton.title = '일시정지하고 이 문장의 표현과 번역 이유 보기';
+      studyButton.style.cssText = 'pointer-events:auto;cursor:pointer;color:#e8e0ff;background:#171421dd;border:1px solid #8e80b4;border-radius:14px;font:12px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;padding:5px 12px;margin-top:2px;text-shadow:none;';
+      studyButton.addEventListener('pointerdown', (event) => event.stopPropagation());
+      studyButton.addEventListener('mousedown', (event) => event.stopPropagation());
+      studyButton.addEventListener('keydown', (event) => event.stopPropagation());
+      studyButton.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); studyController?.open('', studyButton); });
+      overlayEl.appendChild(studyButton);
+    }
     console.log(`[이중자막][${PLATFORM}] 오버레이 생성`);
   }
 
@@ -600,6 +630,7 @@
 
       const koText = koCue ? koCue.text : '';
       const enText = enCue ? enCue.text : '';
+      if (studyButton) studyButton.hidden = !enText;
 
       if (koText !== lastKo) {
         koTextEl.textContent = koText;

@@ -233,3 +233,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+importScripts('study-ai.js');

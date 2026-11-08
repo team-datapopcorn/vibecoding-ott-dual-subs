@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('study-settings').addEventListener('click', () => chrome.runtime.openOptionsPage());
   // --- DOM 참조 ---
   const statusDot = document.getElementById('status-dot');
   const statusText = document.getElementById('status-text');

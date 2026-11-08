@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OTT 이중자막 (Dual Subs)",
-  "version": "2.0.1",
-  "description": "쿠팡플레이·넷플릭스에서 한국어+영어 자막을 동시에 표시합니다. 영어 공부에 최적화된 이중자막 익스텐션.",
+  "version": "2.1.0",
+  "description": "쿠팡플레이·넷플릭스 한국어+영어 이중자막과 표현·번역 이유 해설. AI 해설은 별도 연결 후 요청할 때만 사용합니다.",
   "permissions": [
     "webRequest",
     "storage",
@@ -19,13 +19,29 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.coupangplay.com/*"],
-      "js": ["vtt-parser.js", "ttml-parser.js", "subtitle-session.js", "content.js"],
+      "matches": [
+        "*://*.coupangplay.com/*"
+      ],
+      "js": [
+        "vtt-parser.js",
+        "ttml-parser.js",
+        "subtitle-session.js",
+        "study.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://*.netflix.com/*"],
-      "js": ["vtt-parser.js", "ttml-parser.js", "subtitle-session.js", "content.js"],
+      "matches": [
+        "*://*.netflix.com/*"
+      ],
+      "js": [
+        "vtt-parser.js",
+        "ttml-parser.js",
+        "subtitle-session.js",
+        "study.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -41,5 +57,12 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "optional_host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "options_ui": {
+    "page": "study-options.html",
+    "open_in_tab": true
   }
 }
