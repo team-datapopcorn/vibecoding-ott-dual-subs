@@ -15,12 +15,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const dlHeader = document.getElementById('dl-header');
   const dlBody = document.getElementById('dl-body');
   const dlArrow = document.getElementById('dl-arrow');
+  const inlineNotes = document.getElementById('inline-notes');
   const dlList = document.getElementById('dl-list');
 
   // --- 저장된 자막 설정 반영 (다음 편에도 같은 크기·색·위치) ---
   try {
     const saved = await chrome.storage.local.get('dualSettings');
     const st = saved.dualSettings;
+    inlineNotes.checked = st?.inlineNotes !== false;
     if (st) {
       if (st.enFontSize) { enSizeSlider.value = st.enFontSize; enSizeVal.textContent = st.enFontSize + 'px'; }
       if (st.koFontSize) { koSizeSlider.value = st.koFontSize; koSizeVal.textContent = st.koFontSize + 'px'; }
@@ -142,11 +144,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       koFontSize: parseInt(koSizeSlider.value),
       enColor: enColorSelect.value,
       position: subPositionSelect.value,
+      inlineNotes: inlineNotes.checked,
     };
     chrome.storage.local.set({ dualSettings: settings });
     chrome.tabs.sendMessage(tab.id, { type: 'UPDATE_SETTINGS', settings }, () => void chrome.runtime.lastError);
   }
 
+  inlineNotes.addEventListener('change', sendSettings);
   // --- 다운로드 섹션 접기/펼치기 ---
   dlHeader.addEventListener('click', () => {
     const isOpen = dlBody.classList.toggle('open');

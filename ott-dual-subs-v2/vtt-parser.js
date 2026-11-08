@@ -84,7 +84,7 @@ function parseTimestamp(ts) {
  */
 function findActiveCue(cues, currentTime) {
   for (const cue of cues) {
-    if (currentTime >= cue.startTime && currentTime <= cue.endTime) {
+    if (currentTime >= cue.startTime && currentTime < cue.endTime) {
       return cue;
     }
   }

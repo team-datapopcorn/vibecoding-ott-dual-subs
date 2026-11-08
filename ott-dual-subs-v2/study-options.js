@@ -4,6 +4,7 @@
   const apiKeyInput = document.getElementById('api-key');
   const modelInput = document.getElementById('model');
   const includeContextInput = document.getElementById('include-context');
+  const inlineAIInput = document.getElementById('inline-ai');
   const consentInput = document.getElementById('consent');
   const saveButton = document.getElementById('save');
   const clearButton = document.getElementById('clear');
@@ -45,6 +46,7 @@
     }
     modelInput.value = response.model || 'gemini-2.5-flash';
     includeContextInput.checked = response.includeContext === true;
+    inlineAIInput.checked = response.inlineAI === true;
     connectionState.textContent = response.configured ? '연결됨' : '연결되지 않음';
     setStatus('', '');
   }
@@ -71,6 +73,7 @@
       model: modelInput.value.trim(),
       includeContext: includeContextInput.checked,
       consent: true,
+      inlineAI: inlineAIInput.checked,
     });
     setBusy(false);
     if (!response.ok) {
@@ -81,7 +84,7 @@
     connectionState.textContent = '연결됨';
     modelInput.value = response.model || modelInput.value;
     includeContextInput.checked = response.includeContext === true;
-    setStatus('저장했습니다. OTT 페이지에서 학습 설명을 요청할 수 있습니다.', 'ok');
+    setStatus('저장했습니다. 자동 주석을 켠 경우 OTT 페이지에서 새 자막부터 짧은 주석을 생성합니다.', 'ok');
   });
 
   clearButton.addEventListener('click', async () => {

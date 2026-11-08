@@ -37,7 +37,7 @@
 <body>
   <main>
     <h1>OTT 이중자막 학습 설정</h1>
-    <p class="lead">현재 자막의 영어 표현과 한국어 번역 차이를 Gemini로 설명받을 수 있습니다.</p>
+    <p class="lead">영·한 자막 옆 빈 공간에 짧은 표현 주석을 함께 표시합니다. 재생은 멈추지 않습니다.</p>
 
     <section class="card">
       <div class="notice privacy">
@@ -46,7 +46,7 @@
       </div>
       <div class="notice" style="margin-top:12px">
         <strong>비용 안내</strong><br>
-        Gemini API 사용량에 따라 Google 측 요금이 발생할 수 있습니다. 이 기능은 선택 사항이며 자동으로 설명을 생성하지 않습니다.
+        Gemini API 사용량에 따라 Google 측 요금이 발생할 수 있습니다. 기본은 자동 요청 꺼짐입니다. 아래에서 AI 자동 주석을 켜면 재생 중 새로운 자막마다 요청이 발생할 수 있습니다.
       </div>
 
       <div style="margin-top:20px">
@@ -72,6 +72,7 @@
         <span>인접 자막 한 줄씩도 보내기<br><small style="font-weight:400;color:#667085">현재 문장만으로 부족할 때만 켜세요.</small></span>
       </label>
 
+      <label class="check" for="inline-ai"><input id="inline-ai" type="checkbox"><span>AI 자동 주석 켜기<br><small style="font-weight:400;color:#667085">재생 중 자막을 자동 전송합니다. 요청마다 제공자 요금이 발생할 수 있어요. 현재 개발판에는 100회 무료 이용권·과금 서버가 연결되어 있지 않습니다.</small></span></label>
       <label class="check" for="consent"><input id="consent" type="checkbox"><span>위 범위의 자막 전송과 제공자 비용 안내를 확인했어요.</span></label>
       <div class="actions">
         <button id="save" type="button">저장하고 연결</button>

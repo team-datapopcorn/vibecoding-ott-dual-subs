@@ -217,7 +217,7 @@ test('options save, session-only key, cache versioning, exact context, and clear
     type: 'STUDY_CONFIG_SAVE',
     payload: { apiKey: 'secret-key-123', model: 'gemini-2.5-flash', includeContext: true, consent: true },
   }, OPTIONS_SENDER);
-  assert.deepEqual(saved, { ok: true, configured: true, model: 'gemini-2.5-flash', includeContext: true });
+  assert.deepEqual(saved, { ok: true, configured: true, model: 'gemini-2.5-flash', includeContext: true, inlineAI: false });
   assert.equal(chrome._permissionRequests.length, 1);
   assert.deepEqual(chrome._permissionRequests[0], { origins: ['https://generativelanguage.googleapis.com/*'] });
   assert.equal(chrome.storage.local._values.has('studyGeminiApiKey'), false);
@@ -237,7 +237,7 @@ test('options save, session-only key, cache versioning, exact context, and clear
     assert.equal(calls.length, 2);
 
     const status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
-    assert.deepEqual(status, { ok: true, configured: true });
+    assert.deepEqual(status, { ok: true, configured: true, inlineAI: false });
 
     const cleared = await api.handleMessage({ type: 'STUDY_CONFIG_CLEAR' }, OPTIONS_SENDER);
     assert.deepEqual(cleared, { ok: true, configured: false });

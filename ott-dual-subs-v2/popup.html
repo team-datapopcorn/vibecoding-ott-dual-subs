@@ -205,10 +205,10 @@
     </div>
 
     <div class="toggle-card" style="margin-top:12px;padding:12px">
-      <div style="font-size:13px;font-weight:700">표현을 이해하는 자막</div>
-      <p style="font-size:12px;color:#b8c3d7;line-height:1.6;margin:6px 0">영어 자막이나 ‘표현 해설’을 누르면 일시정지하고 뜻·번역 이유·예문을 볼 수 있어요.</p>
-      <button class="dl-btn" id="study-settings">AI 연결 설정</button>
-      <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin-top:6px">AI는 별도 연결 후 요청할 때만 사용해요. 제공자 요금이 발생할 수 있어요.</p>
+      <label style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700">자막 옆 표현 주석 <input id="inline-notes" type="checkbox" checked></label>
+      <p style="font-size:12px;color:#b8c3d7;line-height:1.6;margin:6px 0">자막 좌우 빈 공간에 표현·뜻·짧은 풀이를 함께 표시해요. 클릭하거나 재생을 멈출 필요 없어요.</p>
+      <button class="dl-btn" id="study-settings">AI 자동 주석 설정</button>
+      <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin-top:6px">예문 주석은 바로 표시돼요. 모든 대사의 AI 주석은 별도 연결과 자동 전송 동의가 필요하며 제공자 요금이 발생할 수 있어요.</p>
     </div>
     <!-- 다운로드 (접을 수 있음) -->
     <div class="collapsible">
@@ -223,7 +223,7 @@
     </div>
   </div>
 
-  <div class="footer">v2.1.0 · 쿠팡플레이 / 넷플릭스 지원</div>
+  <div class="footer">v2.1.1 · 쿠팡플레이 / 넷플릭스 지원</div>
 
   <script src="converter.js"></script>
   <script src="popup.js"></script>
