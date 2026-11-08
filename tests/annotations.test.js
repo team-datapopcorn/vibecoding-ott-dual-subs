@@ -30,3 +30,7 @@ test('parser does not keep the old subtitle on an exact cue boundary',()=>{
  const vm=require('node:vm'),fs=require('node:fs');const box={};vm.createContext(box);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../ott-dual-subs-v2/vtt-parser.js'),'utf8'),box);
  assert.equal(box.findActiveCue([{startTime:0,endTime:1,text:'old'},{startTime:1,endTime:2,text:'new'}],1).text,'new');
 });
+test('paused player reserves transport-control space by using shared subtitle side margins',()=>{
+ const p=computePlacement({width:1100,height:974,anchor:{left:423,right:677,top:803,bottom:894},english:{left:334,right:766,top:698,bottom:797},noteHeights:[79,95],pictureBottom:795,controlReserve:180});
+ assert.equal(p.mode,'sides');for(let i=0;i<p.slots.length;i++){const s=p.slots[i];assert.ok(s.y+[79,95][i]<=794);assert.ok(s.x+s.width<=334||s.x>=766);}
+});

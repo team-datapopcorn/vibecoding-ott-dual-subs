@@ -39,23 +39,27 @@
     return JSON.stringify([context.english, context.korean || '', context.previous || '', context.next || '']);
   }
   // All numbers are player-relative CSS pixels. Use actual subtitle bounds, not guessed font widths.
-  function computePlacement({ width, height, anchor, english, noteHeights, pictureBottom }) {
+  function computePlacement({ width, height, anchor, english, noteHeights, pictureBottom, controlReserve = 36 }) {
     const edge = 18, gap = 16, minWidth = 142, maxWidth = 228;
     if (!anchor || width < 260 || height < 180) return { mode: 'hidden', slots: [] };
-    const availableLeft = anchor.left - edge - gap;
-    const availableRight = width - anchor.right - edge - gap;
+    // When both subtitles leave side margins, notes may sit beside English too.
+    const unionLeft = Number.isFinite(english?.left) ? Math.min(anchor.left, english.left) : anchor.left;
+    const unionRight = Number.isFinite(english?.right) ? Math.max(anchor.right, english.right) : anchor.right;
+    const useUnion = Number.isFinite(english?.left) && Number.isFinite(english?.right) && unionLeft-edge-gap>=minWidth && width-unionRight-edge-gap>=minWidth;
+    const availableLeft = (useUnion ? unionLeft : anchor.left) - edge - gap;
+    const availableRight = width - (useUnion ? unionRight : anchor.right) - edge - gap;
     const sideWidths = [Math.min(maxWidth, availableLeft), Math.min(maxWidth, availableRight)];
     const maxHeight = Math.max(...noteHeights, 0);
-    let top = Math.max(anchor.top + 2, english?.bottom + 8 || 0);
+    let top = useUnion ? anchor.top + 2 : Math.max(anchor.top + 2, english?.bottom + 8 || 0);
     // Prefer a real letterbox bar if one exists. This is geometry, not darkness recognition.
-    if (Number.isFinite(pictureBottom) && height - pictureBottom >= maxHeight + 52) top = Math.max(top, pictureBottom + 10);
-    top = Math.min(top, height - maxHeight - 36);
+    if (Number.isFinite(pictureBottom) && height - pictureBottom >= maxHeight + controlReserve + 10) top = Math.max(top, pictureBottom + 10);
+    top = Math.min(top, height - maxHeight - controlReserve);
     const slots = [];
     for (let i = 0; i < noteHeights.length; i++) {
       const side = i === 0 && sideWidths[0] >= minWidth ? 0 : 1;
       if (sideWidths[side] < minWidth || (i > 0 && slots.some((slot) => slot.side === side))) return { mode: 'fallback', slots: [] };
       const x = side === 0 ? edge : width - edge - sideWidths[side];
-      if (top < (english?.bottom || 0) + 8) return { mode: 'fallback', slots: [] };
+      if (!useUnion && top < (english?.bottom || 0) + 8) return { mode: 'fallback', slots: [] };
       slots.push({ side, x, y: top, width: sideWidths[side] });
     }
     return { mode: 'sides', slots };
@@ -86,10 +90,10 @@
       }
       const anchor = korean || english;
       const heights = cards.map(card => { card.hidden=false;card.style.maxWidth='228px';card.querySelector('.detail').hidden=false;card.querySelector('.badge').hidden=false;card.style.width='228px';return card.getBoundingClientRect().height; });
-      let placement = computePlacement({ width:rect.width,height:rect.height,anchor,english,noteHeights:heights,pictureBottom });
+      let placement = computePlacement({ width:rect.width,height:rect.height,anchor,english,noteHeights:heights,pictureBottom,controlReserve:video?.paused ? 180 : 36 });
       if (placement.mode === 'sides') {
         cards.forEach((card,i)=>{const slot=placement.slots[i];card.style.width=slot.width+'px';});
-        placement = computePlacement({ width:rect.width,height:rect.height,anchor,english,noteHeights:cards.map(card=>card.getBoundingClientRect().height),pictureBottom });
+        placement = computePlacement({ width:rect.width,height:rect.height,anchor,english,noteHeights:cards.map(card=>card.getBoundingClientRect().height),pictureBottom,controlReserve:video?.paused ? 180 : 36 });
       }
       if (placement.mode === 'sides') cards.forEach((card,i)=>{const slot=placement.slots[i];card.style.left=slot.x+'px';card.style.top=slot.y+'px';card.hidden=false;card.dataset.placement='side';});
       else {
@@ -99,7 +103,7 @@
         card.querySelector('.detail').hidden=true;card.querySelector('.badge').hidden=true;
         const y=Math.max(anchor.bottom,english.bottom)+8;
         card.style.left=Math.max(18,(rect.width-Math.min(320,rect.width-36))/2)+'px';card.style.top=y+'px';
-        card.hidden=y+card.getBoundingClientRect().height>rect.height-34;card.dataset.placement='below';
+        card.hidden=y+card.getBoundingClientRect().height>rect.height-(video?.paused ? 180 : 34);card.dataset.placement='below';
         for(const other of cards.slice(1))other.hidden=true;
       }
     }
@@ -149,8 +153,10 @@
     }
     const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
     resize?.observe(container);resize?.observe(englishEl);if(koreanEl)resize?.observe(koreanEl);
+    const observedVideo=getVideo?.();
+    observedVideo?.addEventListener?.('pause',place);observedVideo?.addEventListener?.('play',place);
     const onResize=()=>place();window.addEventListener('resize',onResize);document.addEventListener('fullscreenchange',onResize);
-    return {update,layout:place,clear(){currentKey='';context=null;generation++;clear();},destroy(){disposed=true;generation++;clear();resize?.disconnect();window.removeEventListener('resize',onResize);document.removeEventListener('fullscreenchange',onResize);host.remove();}};
+    return {update,layout:place,clear(){currentKey='';context=null;generation++;clear();},destroy(){disposed=true;generation++;clear();resize?.disconnect();observedVideo?.removeEventListener?.('pause',place);observedVideo?.removeEventListener?.('play',place);window.removeEventListener('resize',onResize);document.removeEventListener('fullscreenchange',onResize);host.remove();}};
   }
   const api={localAnnotations,toAnnotations,contextKey,computePlacement,mount};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;

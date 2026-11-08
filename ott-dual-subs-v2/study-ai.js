@@ -525,7 +525,7 @@
     if (!isOptionsSender(sender)) return responseError('OPTIONS_ONLY', '설정 페이지에서만 학습 설정을 관리할 수 있습니다.');
     try {
       const state = await readConfig();
-      return { ok: true, configured: Boolean(state.apiKey), model: state.config.model, includeContext: state.config.includeContext, inlineAI: state.config.inlineAI };
+      return { ok: true, configured: Boolean(state.apiKey), model: state.config.model, includeContext: state.config.includeContext, inlineAI: state.config.inlineAI, depth: await readDepth() };
     } catch {
       return responseError('STORAGE_ERROR', '학습 설정을 읽지 못했습니다.');
     }

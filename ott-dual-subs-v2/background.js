@@ -169,13 +169,12 @@ function extractFilename(url) {
 }
 
 // 배지 업데이트
-function updateBadge(tabId, count) {
-  if (count > 0) {
-    chrome.action.setBadgeText({ text: String(count), tabId });
-    chrome.action.setBadgeBackgroundColor({ color: '#E53935', tabId });
-  } else {
-    chrome.action.setBadgeText({ text: '', tabId });
-  }
+async function updateBadge(tabId, count) {
+  // onRemoved fires after the tab is gone; badge writes must not reject the worker.
+  try {
+    await chrome.action.setBadgeText({ text: count > 0 ? String(count) : '', tabId });
+    if (count > 0) await chrome.action.setBadgeBackgroundColor({ color: '#E53935', tabId });
+  } catch { /* A closed tab has no badge to update. */ }
 }
 
 // 탭 정리

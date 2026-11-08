@@ -373,3 +373,10 @@ test('unreadable dictionary blocks regeneration rather than charging for a suppo
  const api=makeApi(chrome);const originalFetch=global.fetch;let calls=0;global.fetch=async()=>{calls++;throw Error('must not call');};
  try{const result=await api.handleMessage(validMessage(),CONTENT_SENDER);assert.equal(result.code,'DICTIONARY_ERROR');assert.equal(calls,0);}finally{global.fetch=originalFetch;}
 });
+
+test('options page reload restores a saved non-default depth even without an API key',async()=>{
+ const chrome=makeChrome();const api=makeApi(chrome);
+ await api.handleMessage({type:'STUDY_DEPTH_SET',depth:'weak'},OPTIONS_SENDER);
+ const reopened=makeApi(chrome);const result=await reopened.handleMessage({type:'STUDY_CONFIG_GET'},OPTIONS_SENDER);
+ assert.equal(result.ok,true);assert.equal(result.configured,false);assert.equal(result.depth,'weak');
+});
