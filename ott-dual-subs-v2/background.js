@@ -234,4 +234,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-importScripts('study-ai.js');
+importScripts('phrase-dictionary.js', 'study-ai.js');

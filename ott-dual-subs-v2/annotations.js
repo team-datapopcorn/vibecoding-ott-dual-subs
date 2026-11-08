@@ -68,7 +68,7 @@
     style.textContent = `:host{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e7e9ef;text-align:left}*{box-sizing:border-box}[hidden]{display:none!important}.note{position:absolute;max-width:228px;padding:9px 11px;border-left:2px solid #b0a4cb;background:linear-gradient(90deg,#101116aa,#10111630);border-radius:0 5px 5px 0;text-shadow:0 1px 3px #000;line-height:1.45;pointer-events:none}.expression{font-size:13px;color:#e5d3ff;font-weight:600;overflow-wrap:anywhere}.meaning{font-size:13px;color:#f3f3f5;margin-top:3px;overflow-wrap:anywhere}.detail{font-size:11px;color:#bcc2ce;margin-top:4px;overflow-wrap:anywhere}.badge{display:none}`;
     shadow.append(style); container.append(host);
     let disposed = false, currentKey = '', context = null, generation = 0, wanted = [], cards = [];
-    const cache = new Map(), pending = new Map();
+    const pending = new Map();
     let lastSource = '';
     function clear() { for (const card of cards) card.remove(); cards = []; wanted = []; }
     function place() {
@@ -107,7 +107,7 @@
       clear();wanted=notes.slice(0,2);lastSource=source;
       for(const item of wanted){
         const card=document.createElement('aside');card.className='note';card.setAttribute('aria-label','영어 표현 주석');
-        for(const [cls,text] of [['expression',item.expression],['meaning',item.meaning],['detail',item.note],['badge',source==='gemini'?'AI 주석':'예문 주석']]){
+        for(const [cls,text] of [['expression',item.expression],['meaning',item.meaning],['detail',item.note],['badge',source==='gemini'?'AI 주석':'사전 재사용']]){
           const part=document.createElement('div');part.className=cls;part.textContent=text;card.append(part);
         }
         shadow.append(card);cards.push(card);
@@ -115,26 +115,37 @@
       place();
     }
     async function update(nextContext) {
-      const key=contextKey(nextContext);
+      const depth = ['strong','medium','weak'].includes(getSettings().annotationDepth) ? getSettings().annotationDepth : 'medium';
+      const cueKey = contextKey(nextContext);
+      const key = cueKey ? depth + ':' + cueKey : '';
       if (disposed) return;
       if (!key || getSettings().inlineNotes === false) { currentKey='';context=null;generation++;clear();return; }
       if(key===currentKey){place();return;}
       currentKey=key;context={...nextContext};const token=++generation;clear();
-      const local=localAnnotations(context);
-      if(local.length){render(local,'local');return;}
-      if(cache.has(key)){render(cache.get(key),'gemini');return;}
-      try{
-        // Saving a key alone is not permission for automatic, potentially paid AI requests.
+      try {
+        // Persistent dictionary always precedes status checks or a provider request.
+        const lookup=await request({type:'STUDY_DICTIONARY_LOOKUP',payload:context});
+        if(disposed||token!==generation)return;
+        if(lookup?.ok){
+          if(lookup.notes?.length){render(lookup.notes,'dictionary');return;}
+          if(!lookup.eligible)return;
+        } else {
+          // Content-only preview can still use the same reviewed local dictionary and depth rules.
+          const api=globalThis.OTTDualSubsDictionary;
+          const plan=api?.planGeneration(api.BUILTIN_ENTRIES || api.builtinEntries || [], context, depth);
+          if(plan?.reused?.length){render(plan.reused.map(e=>({expression:e.matchedExpression||e.expression,meaning:e.meaning,note:e.note})),'dictionary');return;}
+          // A real storage error is not permission to charge for regenerating a saved expression.
+          return;
+        }
         const status=await request({type:'STUDY_STATUS'});
         if(disposed||token!==generation||!status?.configured||status.inlineAI!==true)return;
         if(!pending.has(key)) pending.set(key,request({type:'STUDY_EXPLAIN',payload:context}));
         const answer=await pending.get(key);pending.delete(key);
         if(answer?.ok){
-          const notes=toAnnotations(answer.explanation,nextContext.english);
-          if(notes.length){cache.set(key,notes);while(cache.size>60)cache.delete(cache.keys().next().value);}
-          if(!disposed&&token===generation&&currentKey===key&&notes.length)render(notes,'gemini');
+          const notes=answer.notes || toAnnotations(answer.explanation,nextContext.english);
+          if(!disposed&&token===generation&&currentKey===key&&notes.length)render(notes,answer.source==='dictionary'?'dictionary':'gemini');
         }
-      }catch{pending.delete(key);/* Failed or late AI never replaces current subtitles with stale notes. */}
+      }catch{pending.delete(key);}
     }
     const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
     resize?.observe(container);resize?.observe(englishEl);if(koreanEl)resize?.observe(koreanEl);

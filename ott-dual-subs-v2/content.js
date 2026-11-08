@@ -60,6 +60,7 @@
     enColor: '#FFD54F',
     position: 'bottom',
     inlineNotes: true,
+    annotationDepth: 'medium',
   };
 
   // 저장된 설정과 "이중자막 켜 둠" 상태를 불러온다. 켜 둔 상태면 다음 편·새로고침에도 자동으로 켠다.
@@ -73,6 +74,11 @@
     });
   } catch {}
 
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if(area==='local' && changes.dualSettings?.newValue){settings={...settings,...changes.dualSettings.newValue};applySettings();}
+    });
+  } catch {}
   function saveEnabled(value) {
     autoEnable = value;
     try { chrome.storage.local.set({ dualEnabled: value }); } catch {}

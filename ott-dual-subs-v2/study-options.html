@@ -16,6 +16,12 @@
     input[type="password"], input[type="text"] { width: 100%; border: 1px solid #cfd4dc; border-radius: 8px; padding: 11px 12px; font: inherit; }
     input:focus { outline: 3px solid #dbeafe; border-color: #3b82f6; }
     .help { font-size: 13px; color: #667085; line-height: 1.55; margin: 7px 0 0; }
+    select { width:100%;padding:10px;border:1px solid #cfd4dc;border-radius:8px;background:white;font:inherit;color:#1f2937 }
+    .dictionary-list { max-height:390px;overflow:auto;margin-top:12px }
+    .dict-entry { padding:12px 0;border-top:1px solid #e4e7ec;line-height:1.5 }
+    .dict-entry strong { color:#344054 } .dict-meta { color:#667085;font-size:11px }
+    .dict-meaning { font-size:14px;margin-top:3px }.dict-note { font-size:12px;color:#667085;margin-top:3px }
+    .dict-delete { float:right;font-size:11px;padding:5px 8px;background:#fff1f0;color:#a82c25 }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .check { display: flex; gap: 10px; align-items: flex-start; margin-top: 18px; font-weight: 600; }
     .check input { width: 18px; height: 18px; margin: 1px 0 0; }
@@ -39,14 +45,31 @@
     <h1>OTT 이중자막 학습 설정</h1>
     <p class="lead">영·한 자막 옆 빈 공간에 짧은 표현 주석을 함께 표시합니다. 재생은 멈추지 않습니다.</p>
 
-    <section class="card">
+    <section class="card" aria-label="주석 깊이 설정"><label for="annotation-depth">주석 깊이</label><select id="annotation-depth"><option value="strong">강 · 모든 대사</option><option value="medium" selected>중 · 자주 쓰는 주요 표현 (추천)</option><option value="weak">약 · 전문용어 위주</option></select>
+      <p class="help">강은 모든 대사, 중은 자주 쓰는 주요 표현, 약은 전문용어를 중심으로 표시해요. 기본값은 중입니다.</p>
+      <p class="help">어느 깊이든 저장된 표현을 먼저 재사용합니다. 강도 같은 표현을 매번 새로 생성하는 모드는 아니에요.</p>
+      <p id="depth-status" class="help" role="status"></p>
+    </section>
+
+    <section class="card" aria-label="표현 사전">
+      <h2 style="font-size:19px;margin:0">표현 사전</h2>
+      <p class="help">기본 사전과 AI가 새로 만든 표현을 이 브라우저에 저장합니다. 같은 뜻의 표현은 다른 대사에서도 재사용하며, 전체 자막·영상은 저장하지 않아요.</p>
+      <p class="help">대표 다의어는 자막 문맥을 확인해 뜻을 나눕니다. 중·약의 선별은 로컬 표현 목록 기반이라 일부 표현을 놓칠 수 있어요.</p>
+      <p id="dictionary-stats" class="help" role="status">사전 불러오는 중…</p>
+      <label for="dictionary-query" style="font-size:13px;margin-top:12px">표현·뜻 검색</label><input id="dictionary-query" type="text" placeholder="예: intel, 시간이 촉박한">
+      <div id="dictionary-list" class="dictionary-list"></div>
+      <div class="actions"><button id="dictionary-prev" type="button">이전</button><span id="dictionary-page" class="help"></span><button id="dictionary-next" type="button">다음</button></div>
+      <p id="dictionary-status" class="help" role="status"></p>
+    </section>
+    <details class="card"><summary style="font-weight:700;cursor:pointer">AI 연결 설정 (선택)</summary>
+      <div style="margin-top:16px">
       <div class="notice privacy">
         <strong>개인정보 안내</strong><br>
         요청에는 현재 영어·한국어 자막과 선택한 표현만 포함됩니다. 아래 체크박스를 켠 경우에만 바로 앞·뒤 영어 자막 한 구간씩을 함께 보냅니다. URL, 영상 제목, 미디어 파일은 보내지 않습니다.
       </div>
       <div class="notice" style="margin-top:12px">
         <strong>비용 안내</strong><br>
-        Gemini API 사용량에 따라 Google 측 요금이 발생할 수 있습니다. 기본은 자동 요청 꺼짐입니다. 아래에서 AI 자동 주석을 켜면 재생 중 새로운 자막마다 요청이 발생할 수 있습니다.
+        Gemini API 사용량에 따라 Google 측 요금이 발생할 수 있습니다. 기본은 자동 요청 꺼짐입니다. AI 자동 주석을 켜면 선택한 깊이에 맞고 사전에 없는 표현만 요청합니다.
       </div>
 
       <div style="margin-top:20px">
@@ -79,7 +102,8 @@
         <button id="clear" type="button">연결 정보 지우기</button>
       </div>
       <div id="status" role="status" aria-live="polite"></div>
-    </section>
+      </div>
+    </details>
   </main>
   <script src="study-options.js"></script>
 </body>

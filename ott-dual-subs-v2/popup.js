@@ -15,6 +15,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const dlHeader = document.getElementById('dl-header');
   const dlBody = document.getElementById('dl-body');
   const dlArrow = document.getElementById('dl-arrow');
+  let preferenceTab = null;
+  const depthSelect = document.getElementById('annotation-depth');
+  depthSelect.addEventListener('change', async()=>{
+    const saved=await chrome.storage.local.get('dualSettings');
+    const st={...(saved.dualSettings||{}),annotationDepth:depthSelect.value};
+    await chrome.storage.local.set({dualSettings:st});
+    if(preferenceTab)chrome.tabs.sendMessage(preferenceTab.id,{type:'UPDATE_SETTINGS',settings:{annotationDepth:depthSelect.value}},()=>void chrome.runtime.lastError);
+  });
   const inlineNotes = document.getElementById('inline-notes');
   const dlList = document.getElementById('dl-list');
 
@@ -22,6 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const saved = await chrome.storage.local.get('dualSettings');
     const st = saved.dualSettings;
+    depthSelect.value=['strong','medium','weak'].includes(st?.annotationDepth)?st.annotationDepth:'medium';
     inlineNotes.checked = st?.inlineNotes !== false;
     if (st) {
       if (st.enFontSize) { enSizeSlider.value = st.enFontSize; enSizeVal.textContent = st.enFontSize + 'px'; }
@@ -33,6 +42,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- 현재 탭 ---
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  preferenceTab=tab;
 
   // 지원 플랫폼 확인
   const isCoupang = tab?.url?.includes('coupangplay.com');
@@ -145,6 +155,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       enColor: enColorSelect.value,
       position: subPositionSelect.value,
       inlineNotes: inlineNotes.checked,
+      annotationDepth: depthSelect.value,
     };
     chrome.storage.local.set({ dualSettings: settings });
     chrome.tabs.sendMessage(tab.id, { type: 'UPDATE_SETTINGS', settings }, () => void chrome.runtime.lastError);

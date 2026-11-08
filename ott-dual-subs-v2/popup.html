@@ -207,8 +207,10 @@
     <div class="toggle-card" style="margin-top:12px;padding:12px">
       <label style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700">자막 옆 표현 주석 <input id="inline-notes" type="checkbox" checked></label>
       <p style="font-size:12px;color:#b8c3d7;line-height:1.6;margin:6px 0">자막 좌우 빈 공간에 표현·뜻·짧은 풀이를 함께 표시해요. 클릭하거나 재생을 멈출 필요 없어요.</p>
-      <button class="dl-btn" id="study-settings">AI 자동 주석 설정</button>
-      <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin-top:6px">예문 주석은 바로 표시돼요. 모든 대사의 AI 주석은 별도 연결과 자동 전송 동의가 필요하며 제공자 요금이 발생할 수 있어요.</p>
+      <label for="annotation-depth" style="font-size:11px;color:#b8c3d7">주석 깊이</label><select id="annotation-depth" style="width:100%;background:#0d1117;color:#e0e0e0;border:1px solid #444;border-radius:5px;padding:7px;margin:5px 0"><option value="strong">강 · 모든 대사</option><option value="medium" selected>중 · 주요 표현 (추천)</option><option value="weak">약 · 전문용어 위주</option></select>
+      <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin:3px 0">저장된 표현은 먼저 사전에서 재사용해요.</p>
+      <button class="dl-btn" id="study-settings">표현 사전 · AI 설정</button>
+      <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin-top:6px">사전 표현은 바로 재사용해요. 새 표현만 선택한 깊이에 따라 생성하며, AI 연결·자동 전송 동의와 제공자 요금이 별도로 필요해요.</p>
     </div>
     <!-- 다운로드 (접을 수 있음) -->
     <div class="collapsible">
@@ -223,7 +225,7 @@
     </div>
   </div>
 
-  <div class="footer">v2.1.1 · 쿠팡플레이 / 넷플릭스 지원</div>
+  <div class="footer">v2.2.0 · 쿠팡플레이 / 넷플릭스 지원</div>
 
   <script src="converter.js"></script>
   <script src="popup.js"></script>

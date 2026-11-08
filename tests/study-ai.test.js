@@ -34,7 +34,7 @@ function makeArea(initial = {}) {
 
 function makeChrome({ key = '', config = {}, permissionGranted = true } = {}) {
   const listeners = [];
-  const local = makeArea(config && Object.keys(config).length ? { studyGeminiConfig: config } : {});
+  const local = makeArea({ dualSettings:{annotationDepth:'strong'}, ...(config && Object.keys(config).length ? {studyGeminiConfig:config} : {}) });
   const session = makeArea(key ? { studyGeminiApiKey: key } : {});
   const chrome = {
     runtime: {
@@ -68,7 +68,7 @@ function explanation(overrides = {}) {
     summary: '“run into”는 우연히 마주치거나 문제를 겪는다는 뜻입니다.',
     translationNote: '한국어 자막은 자연스럽게 상황을 압축해 옮겼습니다.',
     phrases: [{
-      expression: 'run into',
+      expression: 'unexpected setback',
       meaning: '우연히 만나다 또는 문제를 겪다',
       breakdown: 'run + into가 결합한 구동사입니다.',
       translationNote: '문맥상 여기서는 문제를 겪는다는 뜻입니다.',
@@ -101,11 +101,11 @@ function validMessage(extra = {}) {
   return {
     type: 'STUDY_EXPLAIN',
     payload: {
-      english: 'I ran into a problem.',
+      english: 'We faced an unexpected setback.',
       korean: '문제가 생겼어요.',
       previous: 'Everything was fine.',
       next: 'Let us fix it.',
-      selection: 'ran into',
+      selection: 'unexpected setback',
       ...extra,
     },
   };
@@ -165,7 +165,7 @@ test('valid Gemini response preserves Korean examples and sends only subtitle fi
     assert.ok(body.generationConfig.responseSchema.properties.phrases.items.required.includes('exampleKo'));
     assert.equal(body.generationConfig.maxOutputTokens, 4096);
     const userText = body.contents[0].parts[0].text;
-    assert.match(userText, /I ran into a problem/);
+    assert.match(userText, /We faced an unexpected setback/);
     assert.match(userText, /문제가 생겼어요/);
     assert.match(userText, /Everything was fine/);
     assert.match(userText, /Let us fix it/);
@@ -234,15 +234,15 @@ test('options save, session-only key, cache versioning, exact context, and clear
     assert.equal(first.ok, true);
     assert.equal(cached.ok, true);
     assert.equal(differentContext.ok, true);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 1);
 
     const status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
-    assert.deepEqual(status, { ok: true, configured: true, inlineAI: false });
+    assert.deepEqual(status, { ok: true, configured: true, inlineAI: false, depth:'strong' });
 
     const cleared = await api.handleMessage({ type: 'STUDY_CONFIG_CLEAR' }, OPTIONS_SENDER);
     assert.deepEqual(cleared, { ok: true, configured: false });
     assert.equal(chrome.storage.session._values.has('studyGeminiApiKey'), false);
-    const afterClear = await api.handleMessage(validMessage({ previous: 'A', selection: 'after-clear' }), CONTENT_SENDER);
+    const afterClear = await api.handleMessage(validMessage({english:'A separate new line to explain.',previous:'A',selection:''}), CONTENT_SENDER);
     assert.equal(afterClear.code, 'CONFIG_MISSING');
     assert.equal(JSON.stringify(afterClear).includes('secret-key-123'), false);
   } finally {
@@ -323,4 +323,53 @@ test('config clear discards in-flight results instead of repopulating cache', as
     assert.equal((await pending).code,'CONFIG_CHANGED');
     assert.equal((await api.handleMessage(validMessage(),CONTENT_SENDER)).code,'CONFIG_MISSING');
   } finally {global.fetch=originalFetch;}
+});
+
+test('dictionary lookup works without a key and medium is the real default', async()=>{
+  const chrome=makeChrome();await chrome.storage.local.set({dualSettings:{}});const api=makeApi(chrome);
+  const result=await api.handleMessage({type:'STUDY_DICTIONARY_LOOKUP',payload:{english:'Make sure the door is locked.',korean:'문이 잠겼는지 꼭 확인해.'}},CONTENT_SENDER);
+  assert.equal(result.ok,true);assert.equal(result.depth,'medium');assert.ok(result.notes.some(n=>/make sure/i.test(n.expression)));
+  const hostile=await api.handleMessage({type:'STUDY_DICTIONARY_LIST'},CONTENT_SENDER);assert.equal(hostile.code,'OPTIONS_ONLY');
+});
+
+test('learned expression is reused in a different sentence after worker restart without another AI request', async()=>{
+  const chrome=makeChrome({key:'development-only-test-key'});const first=makeApi(chrome);const originalFetch=global.fetch;const calls=[];
+  global.fetch=makeFetch(explanation(),calls);
+  try{
+    assert.equal((await first.handleMessage(validMessage(),CONTENT_SENDER)).source,'gemini');
+    const restarted=makeApi(chrome);
+    const result=await restarted.handleMessage(validMessage({english:'That unexpected setback delayed us.',korean:'예상치 못한 차질 때문에 늦어졌어요.',selection:''}),CONTENT_SENDER);
+    assert.equal(result.source,'dictionary');assert.equal(calls.length,1);assert.ok(result.notes[0].expression.includes('unexpected setback'));
+    const list=await restarted.handleMessage({type:'STUDY_DICTIONARY_LIST',query:'unexpected setback'},OPTIONS_SENDER);
+    assert.equal(list.ok,true);assert.ok(list.entries.some(e=>e.expression==='unexpected setback'));
+  }finally{global.fetch=originalFetch;}
+});
+
+test('weak skips everyday expressions before any provider call and depth changes need no API key', async()=>{
+  const chrome=makeChrome();const api=makeApi(chrome);const originalFetch=global.fetch;let calls=0;
+  global.fetch=async()=>{calls++;throw Error('must not call');};
+  try{
+    const changed=await api.handleMessage({type:'STUDY_DEPTH_SET',depth:'weak'},OPTIONS_SENDER);assert.equal(changed.ok,true);
+    const result=await api.handleMessage({type:'STUDY_EXPLAIN',payload:{english:'Make sure you are ready.',korean:'준비됐는지 확인해.'}},CONTENT_SENDER);
+    assert.equal(result.source,'filtered');assert.equal(calls,0);
+  }finally{global.fetch=originalFetch;}
+});
+
+test('identical simultaneous requests share one generation across tabs', async()=>{
+  const chrome=makeChrome({key:'development-only-test-key'});const api=makeApi(chrome);const originalFetch=global.fetch;
+  let finish,startedResolve,calls=0;const started=new Promise(r=>startedResolve=r);
+  global.fetch=()=>{calls++;startedResolve();return new Promise(resolve=>finish=resolve);};
+  try{
+    const a=api.handleMessage(validMessage(),CONTENT_SENDER);await started;
+    const b=api.handleMessage(validMessage(),{...CONTENT_SENDER,tab:{id:8}});
+    finish(responseFor({candidates:[{content:{parts:[{text:JSON.stringify(explanation())}]}}]}));
+    const results=await Promise.all([a,b]);assert.ok(results.every(r=>r.ok));assert.equal(calls,1);
+  }finally{global.fetch=originalFetch;}
+});
+
+test('unreadable dictionary blocks regeneration rather than charging for a supposedly missing phrase',async()=>{
+ const chrome=makeChrome({key:'development-only-test-key'});const oldGet=chrome.storage.local.get;
+ chrome.storage.local.get=async key=>{if(Array.isArray(key))throw Error('dictionary unavailable');return oldGet(key);};
+ const api=makeApi(chrome);const originalFetch=global.fetch;let calls=0;global.fetch=async()=>{calls++;throw Error('must not call');};
+ try{const result=await api.handleMessage(validMessage(),CONTENT_SENDER);assert.equal(result.code,'DICTIONARY_ERROR');assert.equal(calls,0);}finally{global.fetch=originalFetch;}
 });

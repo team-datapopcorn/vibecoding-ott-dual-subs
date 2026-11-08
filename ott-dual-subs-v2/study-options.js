@@ -1,6 +1,13 @@
 (() => {
   'use strict';
 
+  const depthSelect = document.getElementById('annotation-depth');
+  const depthStatus = document.getElementById('depth-status');
+  const dictList = document.getElementById('dictionary-list');
+  const dictQuery = document.getElementById('dictionary-query');
+  const dictStats = document.getElementById('dictionary-stats');
+  const dictStatus = document.getElementById('dictionary-status');
+  let dictOffset=0, dictToken=0, searchTimer;
   const apiKeyInput = document.getElementById('api-key');
   const modelInput = document.getElementById('model');
   const includeContextInput = document.getElementById('include-context');
@@ -21,10 +28,10 @@
     clearButton.disabled = busy;
   }
 
-  function send(type, payload) {
+  function send(type, payload, extra = {}) {
     return new Promise((resolve) => {
       try {
-        chrome.runtime.sendMessage({ type, ...(payload === undefined ? {} : { payload }) }, (response) => {
+        chrome.runtime.sendMessage({ type, ...(payload === undefined ? {} : { payload }), ...extra }, (response) => {
           if (chrome.runtime.lastError) {
             resolve({ ok: false, code: 'RUNTIME_ERROR', message: '확장프로그램과 통신하지 못했습니다.' });
             return;
@@ -44,6 +51,7 @@
       setStatus(response.message, 'error');
       return;
     }
+    depthSelect.value = ['strong','medium','weak'].includes(response.depth) ? response.depth : 'medium';
     modelInput.value = response.model || 'gemini-2.5-flash';
     includeContextInput.checked = response.includeContext === true;
     inlineAIInput.checked = response.inlineAI === true;
@@ -101,5 +109,36 @@
     setStatus('Gemini 연결 정보와 세션 키를 지웠습니다.', 'ok');
   });
 
-  loadConfig();
+  depthSelect.addEventListener('change', async () => {
+    const response=await send('STUDY_DEPTH_SET',undefined,{depth:depthSelect.value});
+    depthStatus.textContent=response.ok?'깊이를 저장했습니다. 현재 자막부터 적용해요.':response.message;
+  });
+  async function loadDictionary() {
+    const token=++dictToken;
+    const response=await send('STUDY_DICTIONARY_LIST',undefined,{query:dictQuery.value,offset:dictOffset});
+    if(token!==dictToken)return;
+    dictList.replaceChildren();
+    if(!response.ok){dictStats.textContent=response.message||'사전을 불러오지 못했습니다.';return;}
+    const stats=response.stats||{};
+    dictStats.textContent='총 '+(stats.total||0)+'개 · 기본 '+(stats.builtin||0)+'개 · 새로 저장 '+(stats.learned||0)+'개 · 재사용 '+(stats.reuses||0)+'회';
+    for(const entry of response.entries||[]){
+      const row=document.createElement('article');row.className='dict-entry';
+      if(entry.source==='ai'){
+        const button=document.createElement('button');button.className='dict-delete';button.type='button';button.textContent='삭제';button.setAttribute('aria-label',entry.expression+' 사전에서 삭제');
+        button.addEventListener('click',async()=>{button.disabled=true;const result=await send('STUDY_DICTIONARY_REMOVE',undefined,{id:entry.id});dictStatus.textContent=result.ok?'직접 저장한 사전 항목을 삭제했습니다.':result.message;await loadDictionary();});row.append(button);
+      }
+      for(const [tag,cls,text] of [['strong','',entry.expression],['div','dict-meta',(entry.kind==='term'?'전문용어':'주요 표현')+' · '+(entry.source==='builtin'?'기본 사전':'AI 저장')],['div','dict-meaning',entry.meaning],['div','dict-note',entry.note]]){
+        const part=document.createElement(tag);part.className=cls;part.textContent=text;row.append(part);
+      }
+      dictList.append(row);
+    }
+    if(!response.entries?.length){const empty=document.createElement('p');empty.className='help';empty.textContent='검색 결과가 없습니다.';dictList.append(empty);}
+    document.getElementById('dictionary-prev').disabled=dictOffset===0;
+    document.getElementById('dictionary-next').disabled=dictOffset+30>=response.total;
+    document.getElementById('dictionary-page').textContent=(response.total?Math.floor(dictOffset/30)+1:0)+' / '+Math.ceil(response.total/30);
+  }
+  dictQuery.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{dictOffset=0;loadDictionary();},180);});
+  document.getElementById('dictionary-prev').addEventListener('click',()=>{dictOffset=Math.max(0,dictOffset-30);loadDictionary();});
+  document.getElementById('dictionary-next').addEventListener('click',()=>{dictOffset+=30;loadDictionary();});
+  loadConfig();loadDictionary();
 })();
