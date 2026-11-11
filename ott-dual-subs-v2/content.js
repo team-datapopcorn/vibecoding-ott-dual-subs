@@ -77,6 +77,7 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if(area==='local' && changes.dualSettings?.newValue){settings={...settings,...changes.dualSettings.newValue};applySettings();}
+      if(area==='local' && changes.studyGeminiConfig)annotationController?.refreshStatus({force:true});
     });
   } catch {}
   function saveEnabled(value) {
@@ -94,7 +95,7 @@
         await enableDualSubs();
         const dualOpt = document.getElementById('dual-sub-option');
         if (dualOpt) applyActiveStyle(dualOpt);
-      }
+      } else { createWaitingIndicator(); }
     } finally { autoEnabling = false; }
   }
 
@@ -299,7 +300,7 @@
         chrome.runtime.sendMessage({ type: 'GET_MY_SUBTITLES' }, (response) => resolve(response || {}));
       });
 
-      if (res.subtitles && res.subtitles.length >= 2) {
+      if (res.subtitles && res.subtitles.length > 0) {
         applySubtitleSourceUpdate(
           res.subtitles.map((subtitle) => subtitle.url),
           res.subtitles.map((subtitle) => subtitle.format),
@@ -494,6 +495,20 @@
   // ------------------------------------------------------------------
   // 5) 오버레이 UI
   // ------------------------------------------------------------------
+  function findVideoContainer() {
+    return (PLATFORM === 'netflix' && (videoEl.closest('.watch-video--player-view') || videoEl.closest('[data-uia="video-canvas"]'))) || videoEl.closest('[class*="player"]') || videoEl.parentElement;
+  }
+  function createWaitingIndicator() {
+    if(!autoEnable||!globalThis.OTTDualSubsAnnotations)return;
+    videoEl=document.querySelector('video');if(!videoEl)return;
+    if(!annotationController){
+      const container=findVideoContainer();
+      if(getComputedStyle(container).position==='static')container.style.position='relative';
+      enTextEl=document.createElement('span');koTextEl=document.createElement('span');
+      annotationController=globalThis.OTTDualSubsAnnotations.mount({container,englishEl:enTextEl,koreanEl:koTextEl,getVideo:()=>videoEl,getSettings:()=>settings,request:message=>new Promise(resolve=>{try{chrome.runtime.sendMessage(message,response=>{resolve(chrome.runtime.lastError?{ok:false,code:'RUNTIME_ERROR'}:response);});}catch{resolve({ok:false,code:'RUNTIME_ERROR'});}})});
+    }
+    annotationController.waitForTracks(subtitleUrls.length);
+  }
   function createOverlay() {
     annotationController?.destroy(); annotationController = null;
     const existing = document.getElementById('dual-sub-overlay');
@@ -505,18 +520,7 @@
       return;
     }
 
-    let videoContainer;
-    if (PLATFORM === 'netflix') {
-      videoContainer =
-        videoEl.closest('.watch-video--player-view') ||
-        videoEl.closest('[data-uia="video-canvas"]') ||
-        videoEl.closest('[class*="player"]') ||
-        videoEl.parentElement;
-    } else {
-      videoContainer =
-        videoEl.closest('[class*="player"]') ||
-        videoEl.parentElement;
-    }
+    const videoContainer = findVideoContainer();
 
     overlayEl = document.createElement('div');
     overlayEl.id = 'dual-sub-overlay';
@@ -577,9 +581,9 @@
           try {
             chrome.runtime.sendMessage(message, (response) => {
               const failed = chrome.runtime.lastError;
-              resolve(failed ? { ok: false } : response);
+              resolve(failed ? { ok: false, code:'RUNTIME_ERROR' } : response);
             });
-          } catch { resolve({ ok: false }); }
+          } catch { resolve({ ok: false, code:'RUNTIME_ERROR' }); }
         }),
       });
     }
@@ -707,6 +711,7 @@
       newVideo.__dualSubHooked = true;
       newVideo.addEventListener('playing', () => tryAutoEnable('playing'));
     }
+    if(autoEnable&&!isEnabled&&subtitleUrls.length<2)createWaitingIndicator();
   });
   videoObserver.observe(document.body, { childList: true, subtree: true });
 

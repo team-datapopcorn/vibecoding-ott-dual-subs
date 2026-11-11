@@ -1,5 +1,11 @@
 document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('study-settings').addEventListener('click', () => chrome.runtime.openOptionsPage());
+  const aiStatusLine=document.getElementById('ai-status-line');
+  chrome.runtime.sendMessage({type:'STUDY_STATUS'},response=>{
+    if(chrome.runtime.lastError||!response?.ok){aiStatusLine.textContent='확장 연결을 확인해주세요.';return;}
+    const view=OTTDualSubsAnnotationStatus.describe(response,{code:'idle'},response.depth||'medium');
+    aiStatusLine.textContent=view.connection+' · '+view.depth;aiStatusLine.title=view.title;
+  });
   // --- DOM 참조 ---
   const statusDot = document.getElementById('status-dot');
   const statusText = document.getElementById('status-text');

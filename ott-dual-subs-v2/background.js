@@ -21,6 +21,13 @@ const PLATFORM_RULES = {
   },
 };
 
+const subtitleQueues = new Map();
+function withSubtitleQueue(tabId, task) {
+  const prior=subtitleQueues.get(tabId)||Promise.resolve();
+  const next=prior.catch(()=>{}).then(task);subtitleQueues.set(tabId,next);
+  next.finally(()=>{if(subtitleQueues.get(tabId)===next)subtitleQueues.delete(tabId);}).catch(()=>{});
+  return next;
+}
 // --- Storage helpers ---
 async function getSubtitles(tabId) {
   const key = `subs_${tabId}`;
@@ -105,7 +112,8 @@ function getHeader(headers, name) {
 }
 
 // --- 공통: 자막 감지 처리 ---
-async function handleSubtitleDetected(tabId, url, platform, format) {
+function handleSubtitleDetected(tabId, url, platform, format) {
+  return withSubtitleQueue(tabId, async () => {
   const subs = await getSubtitles(tabId);
 
   // 중복 방지
@@ -125,10 +133,11 @@ async function handleSubtitleDetected(tabId, url, platform, format) {
 
   console.log(`[${platform}] 자막 감지 (${format}): ${url.substring(0, 80)}... (총 ${subs.length}개)`);
 
-  // 자막 2개 이상이면 Content Script에 전달
-  if (subs.length >= 2) {
+  // 한 개도 전달해 준비 상태(1/2)를 표시하고, 두 개가 모이면 활성화합니다.
+  if (subs.length > 0) {
     sendSubtitleUrlsToContentScript(tabId, subs);
   }
+  });
 }
 
 // Content Script에 자막 URL 전달
@@ -150,12 +159,11 @@ async function sendSubtitleUrlsToContentScript(tabId, subs) {
   }
 }
 
-async function resetSubtitleSession(tabId) {
-  await Promise.all([
-    clearSubtitles(tabId),
-    clearPlatform(tabId),
-  ]);
-  updateBadge(tabId, 0);
+function resetSubtitleSession(tabId) {
+  return withSubtitleQueue(tabId,async()=>{
+    await Promise.all([clearSubtitles(tabId),clearPlatform(tabId)]);
+    await updateBadge(tabId,0);
+  });
 }
 
 // URL에서 파일명 추출
@@ -233,4 +241,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-importScripts('phrase-dictionary.js', 'study-ai.js');
+importScripts('credential-reload.js', 'phrase-dictionary.js', 'study-ai.js');

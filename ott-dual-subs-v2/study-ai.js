@@ -75,6 +75,58 @@
   let sessionAccessPromise = null;
   let listenerInstalled = false;
   let configEpoch = 0;
+  const diagnostics = {
+    attempts: 0,
+    successes: 0,
+    failures: 0,
+    inFlight: 0,
+    lastOutcome: null,
+    lastErrorCode: null,
+    lastHttpStatus: null,
+    lastDurationMs: null,
+    lastUpdatedAt: null,
+    lastSuccessAt: null,
+  };
+
+  function invalidateVerification() {
+    diagnostics.lastOutcome=null;diagnostics.lastErrorCode=null;diagnostics.lastHttpStatus=null;diagnostics.lastSuccessAt=null;diagnostics.lastUpdatedAt=new Date().toISOString();
+  }
+  function diagnosticsSnapshot() {
+    return { ...diagnostics };
+  }
+
+  function safeHttpStatus(status) {
+    return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+  }
+
+  function beginDiagnosticAttempt() {
+    diagnostics.attempts += 1;
+    diagnostics.inFlight += 1;
+    diagnostics.lastOutcome = 'in_flight';
+    diagnostics.lastUpdatedAt = new Date().toISOString();
+    return Date.now();
+  }
+
+  function finishDiagnosticAttempt(startedAt, { outcome, errorCode = null, httpStatus = null, success = false, failure = false } = {}) {
+    diagnostics.inFlight = Math.max(0, diagnostics.inFlight - 1);
+    if (success) diagnostics.successes += 1;
+    if (failure) diagnostics.failures += 1;
+    diagnostics.lastOutcome = outcome;
+    diagnostics.lastErrorCode = errorCode;
+    diagnostics.lastHttpStatus = safeHttpStatus(httpStatus);
+    diagnostics.lastDurationMs = Math.max(0, Date.now() - startedAt);
+    diagnostics.lastUpdatedAt = new Date().toISOString();
+    if (success) diagnostics.lastSuccessAt = diagnostics.lastUpdatedAt;
+  }
+
+  async function permissionGranted() {
+    try {
+      if (!chromeApi.permissions || typeof chromeApi.permissions.contains !== 'function') return false;
+      return Boolean(await chromeApi.permissions.contains({ origins: [API_ORIGIN_PATTERN] }));
+    } catch {
+      return false;
+    }
+  }
 
   function responseError(code, message) {
     return { ok: false, code, message };
@@ -227,6 +279,8 @@
   }
   async function readConfig() {
     await ensureSessionAccessLevel();
+    const restore = globalThis.OTTDualSubsReloadKey && globalThis.OTTDualSubsReloadKey.restore;
+    if (typeof restore === 'function') await restore(chromeApi.storage.session);
     const [localResult, sessionResult] = await Promise.all([
       storageGet('local', CONFIG_KEY),
       storageGet('session', API_KEY),
@@ -390,6 +444,29 @@
     }
   }
 
+  function providerCodeForStatus(status) {
+    if (status === 400) return 'REQUEST_REJECTED';
+    if (status === 401 || status === 403) return 'AUTH_ERROR';
+    if (status === 404) return 'MODEL_NOT_FOUND';
+    if (status === 429) return 'QUOTA_ERROR';
+    if (status >= 500 && status <= 599) return 'PROVIDER_ERROR';
+    return 'PROVIDER_ERROR';
+  }
+
+  function isSafeProviderCode(code) {
+    return ['TIMEOUT', 'REQUEST_REJECTED', 'AUTH_ERROR', 'MODEL_NOT_FOUND', 'QUOTA_ERROR', 'PROVIDER_ERROR'].includes(code);
+  }
+
+  function providerMessage(code) {
+    switch (code) {
+      case 'REQUEST_REJECTED': return 'Gemini 요청이 거부되었습니다. 요청 설정을 확인해주세요.';
+      case 'AUTH_ERROR': return 'Gemini 인증에 실패했습니다. API 키와 권한을 확인해주세요.';
+      case 'MODEL_NOT_FOUND': return '요청한 Gemini 모델을 찾을 수 없습니다. 모델 설정을 확인해주세요.';
+      case 'QUOTA_ERROR': return 'Gemini 사용 한도를 초과했거나 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.';
+      default: return 'Gemini에 연결하지 못했습니다. 네트워크와 API 키를 확인해주세요.';
+    }
+  }
+
   async function requestGemini(model, apiKey, prompt) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -412,13 +489,17 @@
         }),
         signal: controller.signal,
       });
-      if (!response || !response.ok) throw new Error('provider');
+      if (!response || !response.ok) {
+        const httpStatus = safeHttpStatus(response && response.status);
+        throw Object.assign(new Error('provider'), { code: providerCodeForStatus(httpStatus), httpStatus });
+      }
       return await response.json();
     } catch (error) {
       if (error && error.name === 'AbortError') {
-        throw Object.assign(new Error('timeout'), { code: 'TIMEOUT' });
+        throw Object.assign(new Error('timeout'), { code: 'TIMEOUT', httpStatus: null });
       }
-      throw Object.assign(new Error('provider'), { code: 'PROVIDER_ERROR' });
+      if (error && isSafeProviderCode(error.code)) throw error;
+      throw Object.assign(new Error('provider'), { code: 'PROVIDER_ERROR', httpStatus: null });
     } finally {
       clearTimeout(timeout);
     }
@@ -457,7 +538,7 @@
 
     const key = cacheKey(state.config, state.apiKey, input.values);
     const cached = cacheGet(key);
-    if (cached) return { ok: true, explanation: cached, source: 'gemini' };
+    if (cached) return { ok: true, explanation: cached, source: 'gemini', cached: true };
 
     const tabId = sender.tab.id;
     if (inFlightByTab.has(tabId)) return responseError('BUSY', '이 탭에서 이미 학습 설명을 생성하고 있습니다.');
@@ -467,12 +548,19 @@
     const requestToken = Symbol('study-request');
     inFlightByTab.set(tabId, requestToken);
     inFlightCount += 1;
+    const startedAt = beginDiagnosticAttempt();
     try {
       const responseJson = await requestGemini(state.config.model, state.apiKey, buildPrompt(input.values, state.config));
-      if (epochAtStart !== configEpoch) return responseError('CONFIG_CHANGED', 'AI 연결 설정이 바뀌었습니다. 다시 요청해주세요.');
+      if (epochAtStart !== configEpoch) {
+        finishDiagnosticAttempt(startedAt, { outcome: 'cancelled', errorCode: 'CONFIG_CHANGED' });
+        return responseError('CONFIG_CHANGED', 'AI 연결 설정이 바뀌었습니다. 다시 요청해주세요.');
+      }
       const parsed = parseJsonRobust(extractResponseText(responseJson));
       let explanation = validateExplanation(parsed, state.apiKey);
-      if (!explanation) return responseError('INVALID_RESPONSE', 'Gemini가 학습 설명 형식으로 답하지 않았습니다. 다시 시도해주세요.');
+      if (!explanation) {
+        finishDiagnosticAttempt(startedAt, { outcome: 'error', errorCode: 'INVALID_RESPONSE', failure: true });
+        return responseError('INVALID_RESPONSE', 'Gemini가 학습 설명 형식으로 답하지 않았습니다. 다시 시도해주세요.');
+      }
       const norm=text=>String(text||'').toLowerCase().replace(/\s+/g,' ').trim();
       const line=norm(input.values.english);
       explanation.phrases=explanation.phrases.filter(phrase=>{
@@ -481,15 +569,22 @@
         if(input.values.depth==='strong')return true;
         return input.values.candidates.some(candidate=>norm(candidate)===text || norm(candidate).includes(text) || text.includes(norm(candidate)));
       });
-      if(!explanation.phrases.length)return {ok:true,source:'filtered',notes:[],reason:'no_matching_expression'};
+      if(!explanation.phrases.length) {
+        finishDiagnosticAttempt(startedAt, { outcome: 'empty' });
+        return {ok:true,source:'filtered',notes:[],reason:'no_matching_expression'};
+      }
       if (dictionary) {
         try { await dictionary.remember(explanation, input.values); } catch { /* Return successful generation without pretending it was persisted. */ }
       }
       cacheSet(key, explanation, state.config.version);
+      finishDiagnosticAttempt(startedAt, { outcome: 'success', success: true });
       return { ok: true, explanation, source: 'gemini' };
     } catch (error) {
-      if (error && error.code === 'TIMEOUT') return responseError('TIMEOUT', 'Gemini 응답이 늦어 요청을 중단했습니다. 다시 시도해주세요.');
-      return responseError('PROVIDER_ERROR', 'Gemini에 연결하지 못했습니다. 네트워크와 API 키를 확인해주세요.');
+      const rawCode = error && typeof error.code === 'string' ? error.code : '';
+      const code = isSafeProviderCode(rawCode) ? rawCode : 'PROVIDER_ERROR';
+      const message = code === 'TIMEOUT' ? 'Gemini 응답이 늦어 요청을 중단했습니다. 다시 시도해주세요.' : providerMessage(code);
+      finishDiagnosticAttempt(startedAt, { outcome: 'error', errorCode: code, httpStatus: error && error.httpStatus, failure: true });
+      return responseError(code, message);
     } finally {
       if (inFlightByTab.get(tabId) === requestToken) inFlightByTab.delete(tabId);
       inFlightCount = Math.max(0, inFlightCount - 1);
@@ -497,12 +592,12 @@
   }
 
   async function status(sender) {
-    if (!isSupportedContentSender(sender) && !isOptionsSender(sender)) {
+    if (!isSupportedContentSender(sender) && !isPreferencesSender(sender)) {
       return responseError('UNSUPPORTED_SENDER', '지원 페이지 또는 설정 페이지에서만 사용할 수 있습니다.');
     }
     try {
       const state = await readConfig();
-      return { ok: true, configured: Boolean(state.apiKey), inlineAI: state.config.inlineAI, depth: await readDepth() };
+      return { ok: true, configured: Boolean(state.apiKey), permissionGranted: await permissionGranted(), inlineAI: state.config.inlineAI, depth: await readDepth(), diagnostics: diagnosticsSnapshot() };
     } catch {
       return responseError('STORAGE_ERROR', '학습 설정 상태를 읽지 못했습니다.');
     }
@@ -525,7 +620,7 @@
     if (!isOptionsSender(sender)) return responseError('OPTIONS_ONLY', '설정 페이지에서만 학습 설정을 관리할 수 있습니다.');
     try {
       const state = await readConfig();
-      return { ok: true, configured: Boolean(state.apiKey), model: state.config.model, includeContext: state.config.includeContext, inlineAI: state.config.inlineAI, depth: await readDepth() };
+      return { ok: true, configured: Boolean(state.apiKey), permissionGranted: await permissionGranted(), model: state.config.model, includeContext: state.config.includeContext, inlineAI: state.config.inlineAI, depth: await readDepth(), diagnostics: diagnosticsSnapshot() };
     } catch {
       return responseError('STORAGE_ERROR', '학습 설정을 읽지 못했습니다.');
     }
@@ -557,7 +652,7 @@
       await ensureSessionAccessLevel();
       await storageSet('session', { [API_KEY]: apiKey });
       await storageSet('local', { [CONFIG_KEY]: nextConfig });
-      clearCache();
+      clearCache();invalidateVerification();
       return { ok: true, configured: true, model, includeContext: nextConfig.includeContext, inlineAI: nextConfig.inlineAI };
     } catch {
       return responseError('SAVE_FAILED', '설정을 저장하지 못했습니다. 다시 시도해주세요.');
@@ -572,7 +667,7 @@
         storageRemove('session', API_KEY),
         storageRemove('local', CONFIG_KEY),
       ]);
-      clearCache();
+      clearCache();invalidateVerification();
       return { ok: true, configured: false };
     } catch {
       return responseError('CLEAR_FAILED', '저장된 Gemini 연결을 지우지 못했습니다. 다시 시도해주세요.');

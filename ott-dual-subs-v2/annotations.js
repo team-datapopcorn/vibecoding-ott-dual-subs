@@ -69,11 +69,28 @@
     host.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:999998;overflow:hidden;';
     const shadow = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
-    style.textContent = `:host{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e7e9ef;text-align:left}*{box-sizing:border-box}[hidden]{display:none!important}.note{position:absolute;max-width:228px;padding:9px 11px;border-left:2px solid #b0a4cb;background:linear-gradient(90deg,#101116aa,#10111630);border-radius:0 5px 5px 0;text-shadow:0 1px 3px #000;line-height:1.45;pointer-events:none}.expression{font-size:13px;color:#e5d3ff;font-weight:600;overflow-wrap:anywhere}.meaning{font-size:13px;color:#f3f3f5;margin-top:3px;overflow-wrap:anywhere}.detail{font-size:11px;color:#bcc2ce;margin-top:4px;overflow-wrap:anywhere}.badge{display:none}`;
+    style.textContent = `:host{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#e7e9ef;text-align:left}*{box-sizing:border-box}[hidden]{display:none!important}.note{position:absolute;max-width:228px;padding:9px 11px;border-left:2px solid #b0a4cb;background:linear-gradient(90deg,#101116aa,#10111630);border-radius:0 5px 5px 0;text-shadow:0 1px 3px #000;line-height:1.45;pointer-events:none}.expression{font-size:13px;color:#e5d3ff;font-weight:600;overflow-wrap:anywhere}.meaning{font-size:13px;color:#f3f3f5;margin-top:3px;overflow-wrap:anywhere}.detail{font-size:11px;color:#bcc2ce;margin-top:4px;overflow-wrap:anywhere}.badge{font-size:9px;color:#aeb8ca;margin-top:3px;opacity:.8}`;
     shadow.append(style); container.append(host);
     let disposed = false, currentKey = '', context = null, generation = 0, wanted = [], cards = [];
     const pending = new Map();
     let lastSource = '';
+    let configState=null,activityState={code:'gap'},statusPromise=null,lastStatusAt=0;
+    const metrics={dictionaryHits:0};
+    const statusApi=globalThis.OTTDualSubsAnnotationStatus;
+    const statusView=statusApi?.mountIndicator(shadow,()=>request({type:'STUDY_OPEN_SETTINGS'}));
+    function showStatus(){statusView?.render(statusApi.describe(configState,activityState,getSettings().annotationDepth||'medium',metrics));}
+    function activity(code,details={}){activityState={code,...details};showStatus();}
+    async function refreshStatus(options={}){
+      if(disposed)return configState;
+      if(statusPromise)return statusPromise;
+      if(!options.force&&configState&&Date.now()-lastStatusAt<5000)return configState;
+      statusPromise=(async()=>{
+        try {const result=await request({type:'STUDY_STATUS'});if(!disposed){configState=result?.ok?result:{ok:false};lastStatusAt=Date.now();showStatus();}return result;}
+        catch {if(!disposed){configState={ok:false};showStatus();}return{ok:false};}
+        finally {statusPromise=null;}
+      })();return statusPromise;
+    }
+    showStatus();refreshStatus({force:true});
     function clear() { for (const card of cards) card.remove(); cards = []; wanted = []; }
     function place() {
       if (disposed || !cards.length) return;
@@ -109,9 +126,11 @@
     }
     function render(notes, source) {
       clear();wanted=notes.slice(0,2);lastSource=source;
+      if(source==='dictionary')metrics.dictionaryHits+=wanted.length;
+      activity(source==='dictionary'?'dictionary':source==='cache'?'cache':'generated',{count:wanted.length});
       for(const item of wanted){
         const card=document.createElement('aside');card.className='note';card.setAttribute('aria-label','영어 표현 주석');
-        for(const [cls,text] of [['expression',item.expression],['meaning',item.meaning],['detail',item.note],['badge',source==='gemini'?'AI 주석':'사전 재사용']]){
+        for(const [cls,text] of [['expression',item.expression],['meaning',item.meaning],['detail',item.note],['badge',source==='dictionary'?'사전':source==='cache'?'AI 캐시':'새 AI']]){
           const part=document.createElement('div');part.className=cls;part.textContent=text;card.append(part);
         }
         shadow.append(card);cards.push(card);
@@ -123,40 +142,47 @@
       const cueKey = contextKey(nextContext);
       const key = cueKey ? depth + ':' + cueKey : '';
       if (disposed) return;
-      if (!key || getSettings().inlineNotes === false) { currentKey='';context=null;generation++;clear();return; }
-      if(key===currentKey){place();return;}
-      currentKey=key;context={...nextContext};const token=++generation;clear();
+      if (!key || getSettings().inlineNotes === false) { currentKey='';context=null;generation++;clear();activity(getSettings().inlineNotes===false?'disabled':'gap');refreshStatus();return; }
+      if(key===currentKey){place();refreshStatus();return;}
+      currentKey=key;context={...nextContext};const token=++generation;clear();activity('checking');refreshStatus();
       try {
         // Persistent dictionary always precedes status checks or a provider request.
         const lookup=await request({type:'STUDY_DICTIONARY_LOOKUP',payload:context});
         if(disposed||token!==generation)return;
         if(lookup?.ok){
           if(lookup.notes?.length){render(lookup.notes,'dictionary');return;}
-          if(!lookup.eligible)return;
+          if(!lookup.eligible){activity('filtered',{detail:depth==='weak'?'전문용어 후보가 없는 대사입니다.':depth==='medium'?'현재 중 모드의 로컬 주요표현 후보 목록에 없는 대사입니다.':'표시할 표현이 없습니다.'});return;}
         } else {
           // Content-only preview can still use the same reviewed local dictionary and depth rules.
           const api=globalThis.OTTDualSubsDictionary;
           const plan=api?.planGeneration(api.BUILTIN_ENTRIES || api.builtinEntries || [], context, depth);
           if(plan?.reused?.length){render(plan.reused.map(e=>({expression:e.matchedExpression||e.expression,meaning:e.meaning,note:e.note})),'dictionary');return;}
           // A real storage error is not permission to charge for regenerating a saved expression.
-          return;
+          activity('error',{errorCode:lookup?.code||'RUNTIME_ERROR'});return;
         }
-        const status=await request({type:'STUDY_STATUS'});
-        if(disposed||token!==generation||!status?.configured||status.inlineAI!==true)return;
+        const status=await refreshStatus();
+        if(disposed||token!==generation)return;
+        if(!status?.ok){activity('error',{errorCode:'RUNTIME_ERROR'});return;}
+        if(!status.configured){activity('missing');return;}
+        if(status.permissionGranted===false){activity('error',{errorCode:'PERMISSION_REQUIRED'});return;}
+        if(status.inlineAI!==true){activity('off');return;}
+        activity('requesting');
         if(!pending.has(key)) pending.set(key,request({type:'STUDY_EXPLAIN',payload:context}));
         const answer=await pending.get(key);pending.delete(key);
+        await refreshStatus({force:true});
         if(answer?.ok){
           const notes=answer.notes || toAnnotations(answer.explanation,nextContext.english);
-          if(!disposed&&token===generation&&currentKey===key&&notes.length)render(notes,answer.source==='dictionary'?'dictionary':'gemini');
-        }
-      }catch{pending.delete(key);}
+          if(!disposed&&token!==generation&&notes.length){activityState={...activityState,detail:'이전 대사의 AI 응답은 사전에 저장되어 다음 등장 때 재사용됩니다.'};showStatus();}
+          if(!disposed&&token===generation&&currentKey===key){if(notes.length)render(notes,answer.source==='dictionary'?'dictionary':answer.cached?'cache':'gemini');else activity(answer.source==='filtered'?'filtered':'empty');}
+        } else if(!disposed&&token===generation){activity(answer?.code==='BUSY'?'busy':'error',{errorCode:answer?.code||'RUNTIME_ERROR'});}
+      }catch{pending.delete(key);if(!disposed&&token===generation)activity('error',{errorCode:'RUNTIME_ERROR'});}
     }
     const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null;
     resize?.observe(container);resize?.observe(englishEl);if(koreanEl)resize?.observe(koreanEl);
     const observedVideo=getVideo?.();
     observedVideo?.addEventListener?.('pause',place);observedVideo?.addEventListener?.('play',place);
     const onResize=()=>place();window.addEventListener('resize',onResize);document.addEventListener('fullscreenchange',onResize);
-    return {update,layout:place,clear(){currentKey='';context=null;generation++;clear();},destroy(){disposed=true;generation++;clear();resize?.disconnect();observedVideo?.removeEventListener?.('pause',place);observedVideo?.removeEventListener?.('play',place);window.removeEventListener('resize',onResize);document.removeEventListener('fullscreenchange',onResize);host.remove();}};
+    return {update,refreshStatus,waitForTracks(count){activity('tracks',{count,detail:'영어·한국어 자막 두 개가 감지되면 주석이 시작됩니다. 언어 메뉴에서 영어와 한국어를 한 번씩 선택해 주세요.'});refreshStatus();},layout:place,clear(){currentKey='';context=null;generation++;clear();activity('gap');},destroy(){disposed=true;generation++;clear();statusView?.destroy();resize?.disconnect();observedVideo?.removeEventListener?.('pause',place);observedVideo?.removeEventListener?.('play',place);window.removeEventListener('resize',onResize);document.removeEventListener('fullscreenchange',onResize);host.remove();}};
   }
   const api={localAnnotations,toAnnotations,contextKey,computePlacement,mount};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;

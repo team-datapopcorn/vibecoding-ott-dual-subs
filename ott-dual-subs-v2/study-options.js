@@ -55,7 +55,8 @@
     modelInput.value = response.model || 'gemini-2.5-flash';
     includeContextInput.checked = response.includeContext === true;
     inlineAIInput.checked = response.inlineAI === true;
-    connectionState.textContent = response.configured ? '연결됨' : '연결되지 않음';
+    connectionState.textContent = OTTDualSubsAnnotationStatus.describe(response,{code:'idle'},response.depth||'medium').connection;
+    connectionState.title = OTTDualSubsAnnotationStatus.describe(response,{code:'idle'},response.depth||'medium').title;
     setStatus('', '');
   }
 
@@ -89,10 +90,10 @@
       return;
     }
     apiKeyInput.value = '';
-    connectionState.textContent = '연결됨';
+    connectionState.textContent = 'API 키 설정됨 · 응답 미검증';
     modelInput.value = response.model || modelInput.value;
     includeContextInput.checked = response.includeContext === true;
-    setStatus('저장했습니다. 자동 주석을 켠 경우 OTT 페이지에서 새 자막부터 짧은 주석을 생성합니다.', 'ok');
+    setStatus('설정을 저장했습니다. 실제 요청의 성공·실패는 재생 화면의 인디케이터에 표시됩니다.', 'ok');
   });
 
   clearButton.addEventListener('click', async () => {

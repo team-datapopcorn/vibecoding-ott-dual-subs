@@ -237,7 +237,15 @@ test('options save, session-only key, cache versioning, exact context, and clear
     assert.equal(calls.length, 1);
 
     const status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
-    assert.deepEqual(status, { ok: true, configured: true, inlineAI: false, depth:'strong' });
+    assert.equal(status.ok, true);
+    assert.equal(status.configured, true);
+    assert.equal(status.permissionGranted, true);
+    assert.equal(status.inlineAI, false);
+    assert.equal(status.depth, 'strong');
+    assert.deepEqual(Object.keys(status.diagnostics).sort(), ['attempts','successes','failures','inFlight','lastOutcome','lastErrorCode','lastHttpStatus','lastDurationMs','lastUpdatedAt','lastSuccessAt'].sort());
+    assert.equal(status.diagnostics.attempts, 1);
+    assert.equal(status.diagnostics.successes, 1);
+    assert.equal(status.diagnostics.failures, 0);
 
     const cleared = await api.handleMessage({ type: 'STUDY_CONFIG_CLEAR' }, OPTIONS_SENDER);
     assert.deepEqual(cleared, { ok: true, configured: false });
@@ -380,3 +388,159 @@ test('options page reload restores a saved non-default depth even without an API
  const reopened=makeApi(chrome);const result=await reopened.handleMessage({type:'STUDY_CONFIG_GET'},OPTIONS_SENDER);
  assert.equal(result.ok,true);assert.equal(result.configured,false);assert.equal(result.depth,'weak');
 });
+
+
+test('diagnostics stay per worker instance and do not treat a configured key as provider success', async () => {
+  const chrome = makeChrome({ key: 'development-only-test-key' });
+  const api = makeApi(chrome);
+  const statusBefore = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+  assert.equal(statusBefore.configured, true);
+  assert.equal(statusBefore.diagnostics.attempts, 0);
+  assert.equal(statusBefore.diagnostics.successes, 0);
+  assert.equal(statusBefore.diagnostics.lastOutcome, null);
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => responseFor({ candidates: [{ content: { parts: [{ text: JSON.stringify(explanation()) }] } }] });
+  try {
+    const result = await api.handleMessage(validMessage(), CONTENT_SENDER);
+    assert.equal(result.ok, true);
+    const statusAfter = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+    assert.equal(statusAfter.diagnostics.attempts, 1);
+    assert.equal(statusAfter.diagnostics.successes, 1);
+    assert.equal(statusAfter.diagnostics.failures, 0);
+    assert.equal(statusAfter.diagnostics.inFlight, 0);
+    assert.equal(statusAfter.diagnostics.lastOutcome, 'success');
+    assert.equal(statusAfter.diagnostics.lastErrorCode, null);
+    assert.equal(statusAfter.diagnostics.lastHttpStatus, null);
+    assert.equal(typeof statusAfter.diagnostics.lastDurationMs, 'number');
+    assert.equal(typeof statusAfter.diagnostics.lastUpdatedAt, 'string');
+    assert.equal(typeof statusAfter.diagnostics.lastSuccessAt, 'string');
+  } finally { global.fetch = originalFetch; }
+});
+
+test('in-flight diagnostics expose only counters and timestamps while one fetch is pending', async () => {
+  const chrome = makeChrome({ key: 'development-only-test-key' });
+  const api = makeApi(chrome);
+  const originalFetch = global.fetch;
+  let finish;
+  let startedResolve;
+  const started = new Promise(resolve => { startedResolve = resolve; });
+  global.fetch = () => { startedResolve(); return new Promise(resolve => { finish = resolve; }); };
+  try {
+    const pending = api.handleMessage(validMessage(), CONTENT_SENDER);
+    await started;
+    const status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+    assert.equal(status.diagnostics.attempts, 1);
+    assert.equal(status.diagnostics.inFlight, 1);
+    assert.equal(status.diagnostics.successes, 0);
+    assert.equal(status.diagnostics.failures, 0);
+    assert.equal(status.diagnostics.lastOutcome, 'in_flight');
+    finish(responseFor({ candidates: [{ content: { parts: [{ text: JSON.stringify(explanation()) }] } }] }));
+    await pending;
+  } finally { global.fetch = originalFetch; }
+});
+
+test('cache and dictionary reuse do not increment diagnostics or provider attempts', async () => {
+  const chrome = makeChrome({ key: 'development-only-test-key' });
+  const api = makeApi(chrome);
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async () => { calls += 1; return responseFor({ candidates: [{ content: { parts: [{ text: JSON.stringify(explanation()) }] } }] }); };
+  try {
+    assert.equal((await api.handleMessage(validMessage(), CONTENT_SENDER)).source, 'gemini');
+    const cached = await api.handleMessage(validMessage(), { ...CONTENT_SENDER, tab: { id: 8 } });
+    assert.equal(cached.source, 'dictionary');
+    assert.equal(calls, 1);
+    const status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+    assert.equal(status.diagnostics.attempts, 1);
+    assert.equal(status.diagnostics.successes, 1);
+    assert.equal(status.diagnostics.failures, 0);
+  } finally { global.fetch = originalFetch; }
+});
+
+test('HTTP provider statuses are mapped safely and recorded without response body details', async () => {
+  for (const [statusCode, code] of [[400, 'REQUEST_REJECTED'], [401, 'AUTH_ERROR'], [403, 'AUTH_ERROR'], [404, 'MODEL_NOT_FOUND'], [429, 'QUOTA_ERROR'], [500, 'PROVIDER_ERROR']]) {
+    const api = makeApi(makeChrome({ key: `development-only-test-key-${statusCode}` }));
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({ ok: false, status: statusCode, async json() { return { secret: 'body should not escape' }; } });
+    try {
+      const result = await api.handleMessage(validMessage(), CONTENT_SENDER);
+      assert.equal(result.code, code);
+      assert.equal(JSON.stringify(result).includes('body should not escape'), false);
+      const status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+      assert.equal(status.diagnostics.attempts, 1);
+      assert.equal(status.diagnostics.failures, 1);
+      assert.equal(status.diagnostics.lastErrorCode, code);
+      assert.equal(status.diagnostics.lastHttpStatus, statusCode);
+    } finally { global.fetch = originalFetch; }
+  }
+  const api = makeApi(makeChrome({ key: 'development-only-test-key-no-status' }));
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: false, async json() { return {}; } });
+  try {
+    const result = await api.handleMessage(validMessage(), CONTENT_SENDER);
+    assert.equal(result.code, 'PROVIDER_ERROR');
+    const status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+    assert.equal(status.diagnostics.lastHttpStatus, null);
+  } finally { global.fetch = originalFetch; }
+});
+
+test('filtered empty and config-changed outcomes are labeled without counting usable successes', async () => {
+  const chrome = makeChrome({ key: 'development-only-test-key' });
+  const api = makeApi(chrome);
+  const originalFetch = global.fetch;
+  const emptyExplanation = explanation({ phrases: [{ ...explanation().phrases[0], expression: 'not in subtitle' }] });
+  global.fetch = async () => responseFor({ candidates: [{ content: { parts: [{ text: JSON.stringify(emptyExplanation) }] } }] });
+  try {
+    const empty = await api.handleMessage(validMessage(), CONTENT_SENDER);
+    assert.equal(empty.source, 'filtered');
+    let status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+    assert.equal(status.diagnostics.lastOutcome, 'empty');
+    assert.equal(status.diagnostics.successes, 0);
+    assert.equal(status.diagnostics.failures, 0);
+
+    let finish;
+    const started = new Promise(resolve => { global.fetch = () => new Promise(resolveFetch => { finish = resolveFetch; resolve(); }); });
+    const pending = api.handleMessage(validMessage({ selection: 'another' }), CONTENT_SENDER);
+    await started;
+    await api.handleMessage({ type: 'STUDY_CONFIG_CLEAR' }, OPTIONS_SENDER);
+    finish(responseFor({ candidates: [{ content: { parts: [{ text: JSON.stringify(explanation()) }] } }] }));
+    assert.equal((await pending).code, 'CONFIG_CHANGED');
+    status = await api.handleMessage({ type: 'STUDY_STATUS' }, CONTENT_SENDER);
+    assert.equal(status.diagnostics.lastOutcome, 'cancelled');
+    assert.equal(status.diagnostics.lastErrorCode, 'CONFIG_CHANGED');
+    assert.equal(status.diagnostics.successes, 0);
+  } finally { global.fetch = originalFetch; }
+});
+
+test('permission status fails safe and reload-key restoration is awaited without exposing errors', async () => {
+  const chrome = makeChrome({ key: 'development-only-test-key' });
+  delete chrome.permissions;
+  let restores = 0;
+  const previous = globalThis.OTTDualSubsReloadKey;
+  globalThis.OTTDualSubsReloadKey = { async restore(area) { restores += 1; assert.equal(area, chrome.storage.session); } };
+  const api = makeApi(chrome);
+  try {
+    const result = await api.handleMessage({ type: 'STUDY_CONFIG_GET' }, OPTIONS_SENDER);
+    assert.equal(result.ok, true);
+    assert.equal(result.permissionGranted, false);
+    assert.ok(restores >= 1);
+  } finally {
+    if (previous === undefined) delete globalThis.OTTDualSubsReloadKey;
+    else globalThis.OTTDualSubsReloadKey = previous;
+  }
+
+  globalThis.OTTDualSubsReloadKey = { async restore() { throw new Error('secret key restore detail'); } };
+  const failedApi = makeApi(makeChrome({ key: 'development-only-test-key' }));
+  try {
+    const result = await failedApi.handleMessage({ type: 'STUDY_CONFIG_GET' }, OPTIONS_SENDER);
+    assert.equal(result.code, 'STORAGE_ERROR');
+    assert.equal(JSON.stringify(result).includes('secret key restore detail'), false);
+  } finally {
+    if (previous === undefined) delete globalThis.OTTDualSubsReloadKey;
+    else globalThis.OTTDualSubsReloadKey = previous;
+  }
+});
+
+test('trusted popup can read safe status but cannot manage the API key',async()=>{const chrome=makeChrome();const api=makeApi(chrome);const popup={...OPTIONS_SENDER,url:`chrome-extension://${EXTENSION_ID}/popup.html`};assert.equal((await api.handleMessage({type:'STUDY_STATUS'},popup)).ok,true);assert.equal((await api.handleMessage({type:'STUDY_CONFIG_GET'},popup)).code,'OPTIONS_ONLY');});
+test('saving a new key invalidates the prior successful API observation',async()=>{const chrome=makeChrome({key:'development-only-test-key'});const api=makeApi(chrome);const orig=global.fetch;global.fetch=makeFetch(explanation(),[]);try{await api.handleMessage(validMessage(),CONTENT_SENDER);assert.ok((await api.handleMessage({type:'STUDY_STATUS'},CONTENT_SENDER)).diagnostics.lastSuccessAt);await api.handleMessage({type:'STUDY_CONFIG_SAVE',payload:{apiKey:'another-test-only-key',model:'gemini-2.5-flash',consent:true,inlineAI:true}},OPTIONS_SENDER);const state=await api.handleMessage({type:'STUDY_STATUS'},CONTENT_SENDER);assert.equal(state.configured,true);assert.equal(state.diagnostics.lastSuccessAt,null);}finally{global.fetch=orig;}});
