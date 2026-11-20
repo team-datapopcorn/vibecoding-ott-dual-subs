@@ -146,7 +146,7 @@
 <body>
   <div class="header">
     <h1>OTT 이중자막</h1>
-    <p>한국어 + 영어 자막을 동시에 표시</p>
+    <p>한국어 + 영어 · 日本語(베타) 자막을 동시에 표시</p>
   </div>
 
   <div class="content">
@@ -173,11 +173,22 @@
       </div>
     </div>
 
+
+    <!-- 위 줄 언어: 영어 원문 / 일본어 무료 베타 -->
+    <div class="toggle-card" id="lang-card" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><label for="sub-lang" style="font-size:13px;font-weight:700">위 줄 언어</label><span style="font-size:10px;color:#FFD54F;border:1px solid #FFD54F;border-radius:10px;padding:1px 7px">日本語 무료 베타</span></div>
+      <select id="sub-lang" style="width:100%;background:#0d1117;color:#e0e0e0;border:1px solid #444;border-radius:5px;padding:7px;margin:7px 0 4px">
+        <option value="en" selected>English · 영어 원문 자막</option>
+        <option value="ja">日本語 · 일본어 (AI 번역, 무료 베타)</option>
+      </select>
+      <p id="sub-lang-status" style="font-size:11px;color:#9be7a8;line-height:1.5;margin:2px 0"></p>
+      <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin-top:4px">일본어를 고르면 영어 자막 문장만 데이터팝콘 번역 서버(Google Gemini)로 보내 일본어로 바꿔 보여줘요. 베타 기간에는 무료이고 하루 사용량 한도가 있어요. 번역 전인 줄은 영어로 먼저 보여주고, 일본어 모드에서는 표현 주석이 잠시 꺼져요.</p>
+    </div>
     <!-- 자막 설정 -->
     <div class="section-title">자막 설정</div>
     <div class="settings-grid">
       <div class="setting-item">
-        <div class="label">영어 자막 크기</div>
+        <div class="label">위 줄(영어·일본어) 크기</div>
         <input type="range" id="en-size" min="14" max="48" value="26">
         <div class="size-value" id="en-size-val">26px</div>
       </div>
@@ -187,7 +198,7 @@
         <div class="size-value" id="ko-size-val">30px</div>
       </div>
       <div class="setting-item">
-        <div class="label">영어 자막 색상</div>
+        <div class="label">위 줄 색상</div>
         <select id="en-color">
           <option value="#FFD54F" selected>노란색</option>
           <option value="#81D4FA">하늘색</option>
@@ -226,7 +237,7 @@
     </div>
   </div>
 
-  <div class="footer">v2.3.1 · 쿠팡플레이 / 넷플릭스 지원</div>
+  <div class="footer">v2.4.0 · 쿠팡플레이 / 넷플릭스 지원</div>
 
   <script src="converter.js"></script>
   <script src="annotation-status.js"></script>

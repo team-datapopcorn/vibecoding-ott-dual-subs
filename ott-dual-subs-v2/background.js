@@ -241,4 +241,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-importScripts('credential-reload.js', 'phrase-dictionary.js', 'study-ai.js');
+importScripts('credential-reload.js', 'phrase-dictionary.js', 'study-ai.js', 'translate-beta.js');
+
+// 다른 언어 자막 무료 베타: 콘텐츠 스크립트의 번역 요청을 서버로 중계하고 결과를 로컬 캐시한다.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'BETA_TRANSLATE') return false;
+  if (!sender.tab) { sendResponse({ ok: false, code: 'FORBIDDEN' }); return false; }
+  globalThis.OTTDualSubsTranslateBeta.handleTranslate(message, {
+    storage: chrome.storage.local,
+    fetchImpl: (...args) => fetch(...args),
+    version: chrome.runtime.getManifest().version,
+  }).then(sendResponse, () => sendResponse({ ok: false, code: 'INTERNAL_ERROR' }));
+  return true;
+});
