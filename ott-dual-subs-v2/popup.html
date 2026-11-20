@@ -213,6 +213,15 @@
       <button class="dl-btn" id="study-settings">표현 사전 · AI 설정</button>
       <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin-top:6px">사전 표현은 바로 재사용해요. 새 표현만 선택한 깊이에 따라 생성하며, AI 연결·자동 전송 동의와 제공자 요금이 별도로 필요해요.</p>
     </div>
+    <!-- Pro 다른 언어 자막: 수요 조사 (확장은 데이터를 보내지 않고 설문 링크만 연다) -->
+    <div class="toggle-card" id="pro-card" style="margin-top:12px;padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;font-weight:700">다른 언어 자막</span><span style="font-size:10px;color:#FFD54F;border:1px solid #FFD54F;border-radius:10px;padding:1px 7px">Pro 준비 중</span></div>
+      <p style="font-size:12px;color:#b8c3d7;line-height:1.6;margin:6px 0">OTT가 제공하지 않는 일본어·중국어·스페인어·독일어 등 자막을 AI 번역으로 보여주는 기능을 준비하고 있어요. 원하는 언어를 알려주시면 출시할 때 먼저 알려드릴게요.</p>
+      <label for="pro-language" style="font-size:11px;color:#b8c3d7">원하는 언어</label>
+      <select id="pro-language" style="width:100%;background:#0d1117;color:#e0e0e0;border:1px solid #444;border-radius:5px;padding:7px;margin:5px 0"></select>
+      <button class="dl-btn" id="pro-waitlist">출시 알림 신청하기 (설문 열기)</button>
+      <p style="font-size:10px;color:#a4afc0;line-height:1.5;margin-top:6px">버튼을 누르면 Google 설문이 새 탭에서 열려요. 확장은 아무 정보도 보내지 않으며, 이메일은 선택 입력이에요.</p>
+    </div>
     <!-- 다운로드 (접을 수 있음) -->
     <div class="collapsible">
       <div class="collapsible-header" id="dl-header">
@@ -226,10 +235,11 @@
     </div>
   </div>
 
-  <div class="footer">v2.3.1 · 쿠팡플레이 / 넷플릭스 지원</div>
+  <div class="footer">v2.3.2 · 쿠팡플레이 / 넷플릭스 지원</div>
 
   <script src="converter.js"></script>
   <script src="annotation-status.js"></script>
+  <script src="pro-waitlist.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

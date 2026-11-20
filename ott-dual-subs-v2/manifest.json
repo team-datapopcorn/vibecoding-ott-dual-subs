@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OTT 이중자막 (Dual Subs)",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "쿠팡플레이·넷플릭스 이중자막과 자막 옆 동시 표현 주석. 선택적 AI 자동 주석은 별도 연결과 동의가 필요합니다.",
   "permissions": [
     "webRequest",
