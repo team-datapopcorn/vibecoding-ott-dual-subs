@@ -30,6 +30,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if(preferenceTab)chrome.tabs.sendMessage(preferenceTab.id,{type:'UPDATE_SETTINGS',settings:{annotationDepth:depthSelect.value}},()=>void chrome.runtime.lastError);
   });
   const inlineNotes = document.getElementById('inline-notes');
+  const subLangSelect = document.getElementById('sub-lang');
+  const subLangStatus = document.getElementById('sub-lang-status');
+  subLangSelect.addEventListener('change', async () => {
+    const saved = await chrome.storage.local.get('dualSettings');
+    const st = { ...(saved.dualSettings || {}), subLang: subLangSelect.value };
+    await chrome.storage.local.set({ dualSettings: st });
+    if (preferenceTab) chrome.tabs.sendMessage(preferenceTab.id, { type: 'UPDATE_SETTINGS', settings: { subLang: subLangSelect.value } }, () => void chrome.runtime.lastError);
+    subLangStatus.textContent = subLangSelect.value === 'ja' ? '일본어로 바꿨어요. 재생 중이면 지금 장면부터 번역해요.' : '영어 원문 자막으로 바꿨어요.';
+  });
   const dlList = document.getElementById('dl-list');
 
   // --- 저장된 자막 설정 반영 (다음 편에도 같은 크기·색·위치) ---
@@ -38,6 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const st = saved.dualSettings;
     depthSelect.value=['strong','medium','weak'].includes(st?.annotationDepth)?st.annotationDepth:'medium';
     inlineNotes.checked = st?.inlineNotes !== false;
+    subLangSelect.value = st?.subLang === 'ja' ? 'ja' : 'en';
     if (st) {
       if (st.enFontSize) { enSizeSlider.value = st.enFontSize; enSizeVal.textContent = st.enFontSize + 'px'; }
       if (st.koFontSize) { koSizeSlider.value = st.koFontSize; koSizeVal.textContent = st.koFontSize + 'px'; }
@@ -72,6 +82,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (chrome.runtime.lastError || !res) return;
       dualSubToggle.checked = res.enabled;
       updatePreview(res.enabled);
+      const tr = res.translation;
+      if (tr && tr.lang) {
+        const labels = { working: `일본어 번역 중 ${tr.done}/${tr.total}줄`, ready: `일본어 번역 완료 (${tr.total}줄)`, partial: `일부 번역 실패 (${tr.done}/${tr.total}줄), 나머지는 영어로 표시`, error: '번역 서버에 연결하지 못해 영어로 표시 중', limit: tr.code === 'USER_LIMIT' || tr.code === 'DAILY_LIMIT' ? '오늘 무료 번역 한도에 도달했어요. 내일 다시 이용할 수 있어요.' : '번역을 쓸 수 없어 영어로 표시 중' };
+        subLangStatus.textContent = labels[tr.state] || '';
+      }
     });
   } catch {}
 
@@ -162,6 +177,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       position: subPositionSelect.value,
       inlineNotes: inlineNotes.checked,
       annotationDepth: depthSelect.value,
+      subLang: subLangSelect.value,
     };
     chrome.storage.local.set({ dualSettings: settings });
     chrome.tabs.sendMessage(tab.id, { type: 'UPDATE_SETTINGS', settings }, () => void chrome.runtime.lastError);

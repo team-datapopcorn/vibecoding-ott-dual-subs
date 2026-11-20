@@ -61,7 +61,60 @@
     position: 'bottom',
     inlineNotes: true,
     annotationDepth: 'medium',
+    subLang: 'en', // 'en' = 영어 원문, 'ja' = 일본어 무료 베타(영어 자막을 AI 번역)
   };
+
+  // === 다른 언어 자막 무료 베타 ===
+  const betaApi = globalThis.OTTDualSubsTranslateBeta;
+  let renderEpoch = 0;
+  let betaBadgeEl = null;
+  const translator = betaApi
+    ? betaApi.createTranslator({
+        request: (message) => new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage(message, (response) => {
+              resolve(chrome.runtime.lastError ? { ok: false, code: 'RUNTIME_ERROR' } : response);
+            });
+          } catch { resolve({ ok: false, code: 'RUNTIME_ERROR' }); }
+        }),
+        onChange: () => { renderEpoch += 1; },
+      })
+    : null;
+
+  function betaLang() {
+    return betaApi && betaApi.isBetaLang(settings.subLang) ? settings.subLang : '';
+  }
+
+  function dualLabel() {
+    return betaLang() === 'ja' ? '한국어+日本語' : '한국어+영어';
+  }
+
+  function syncTranslation() {
+    if (!translator) return;
+    const lang = betaLang();
+    const current = translator.status();
+    if (!lang || !isEnabled || enCues.length === 0) {
+      if (current.lang) { translator.stop(); renderEpoch += 1; }
+      return;
+    }
+    if (current.lang === lang && current.total === enCues.length) return;
+    annotationController?.clear();
+    translator.start(enCues, lang, () => (videoEl ? videoEl.currentTime : 0));
+    renderEpoch += 1;
+  }
+
+  function betaBadgeText(status) {
+    if (!status || !status.lang) return '';
+    const name = betaApi.LANGS[status.lang]?.label || status.lang;
+    if (status.state === 'working') return `${name} 베타 · AI 번역 중 ${status.done}/${status.total} (번역 전 줄은 영어로 표시)`;
+    if (status.state === 'limit') {
+      return status.code === 'USER_LIMIT' || status.code === 'DAILY_LIMIT'
+        ? `${name} 베타 · 오늘 무료 번역 한도에 도달해 남은 줄은 영어로 표시해요`
+        : `${name} 베타 · 번역을 쓸 수 없어 영어로 표시해요`;
+    }
+    if (status.state === 'error' || status.state === 'partial') return `${name} 베타 · 일부 번역 실패 (${status.done}/${status.total}), 나머지는 영어로 표시`;
+    return '';
+  }
 
   // 저장된 설정과 "이중자막 켜 둠" 상태를 불러온다. 켜 둔 상태면 다음 편·새로고침에도 자동으로 켠다.
   let autoEnable = false;
@@ -137,6 +190,8 @@
         enabled: isEnabled,
         hasSubtitles: subtitleUrls.length >= 2,
         platform: PLATFORM,
+        subLang: settings.subLang,
+        translation: translator ? translator.status() : null,
       });
       return true;
     }
@@ -230,7 +285,7 @@
     const dualOption = lastItem.cloneNode(true);
     dualOption.id = 'dual-sub-option';
 
-    setInnerText(dualOption, '한국어+영어');
+    setInnerText(dualOption, dualLabel());
     removeCheckmark(dualOption);
 
     if (isEnabled) applyActiveStyle(dualOption);
@@ -348,6 +403,7 @@
       setNativeSubsHidden(true);
       syncMenuChecks();
       startRendering();
+      syncTranslation();
     } catch (err) {
       console.error(`[이중자막][${PLATFORM}] 자막 로딩 실패:`, err);
       if (requestId === loadRequestId) {
@@ -406,6 +462,8 @@
   function resetLoadedCues() {
     koCues = [];
     enCues = [];
+    if (translator) translator.stop();
+    renderEpoch += 1;
     clearOverlayText();
   }
 
@@ -534,10 +592,17 @@
       z-index: 999999;
     `;
 
+    betaBadgeEl = document.createElement('div');
+    betaBadgeEl.id = 'dual-sub-beta-status';
+    betaBadgeEl.style.cssText = `
+      display: none; font: 600 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #FFE082; background: rgba(0,0,0,0.55); border-radius: 10px; padding: 2px 10px;
+    `;
+
     enTextEl = document.createElement('div');
     enTextEl.id = 'dual-sub-en';
     enTextEl.style.cssText = `
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', sans-serif;
       font-size: ${settings.enFontSize}px;
       font-weight: 500;
       color: ${settings.enColor};
@@ -566,6 +631,7 @@
       white-space: pre-wrap;
     `;
 
+    overlayEl.appendChild(betaBadgeEl);
     overlayEl.appendChild(enTextEl);
     overlayEl.appendChild(koTextEl);
 
@@ -591,7 +657,12 @@
   }
 
   function applySettings() {
-    if (annotationController && videoEl) annotationController.update(globalThis.OTTDualSubsStudy?.buildContext(enCues, koCues, videoEl.currentTime));
+    if (betaLang()) annotationController?.clear();
+    else if (annotationController && videoEl) annotationController.update(globalThis.OTTDualSubsStudy?.buildContext(enCues, koCues, videoEl.currentTime));
+    const dualOpt = document.getElementById('dual-sub-option');
+    if (dualOpt) setInnerText(dualOpt, dualLabel());
+    syncTranslation();
+    renderEpoch += 1;
     if (enTextEl) {
       enTextEl.style.fontSize = settings.enFontSize + 'px';
       enTextEl.style.color = settings.enColor;
@@ -619,6 +690,9 @@
     let lastKo = '';
     let lastEn = '';
     let lastAnnotationCue = '';
+    let lastEpoch = -1;
+    let lastEnCue = null;
+    let lastEnIndex = -1;
 
     function render() {
       if (!videoEl || !overlayEl || !isEnabled) {
@@ -631,19 +705,41 @@
       const enCue = findActiveCue(enCues, time);
 
       const koText = koCue ? koCue.text : '';
-      const enText = enCue ? enCue.text : '';
+      let enText = enCue ? enCue.text : '';
+      const lang = betaLang();
+      let pending = false;
+      if (lang && enCue && translator) {
+        if (enCue !== lastEnCue) { lastEnCue = enCue; lastEnIndex = enCues.indexOf(enCue); }
+        const translated = translator.textAt(lastEnIndex);
+        if (typeof translated === 'string' && translated) enText = translated;
+        else pending = true;
+      }
 
       if (koText !== lastKo) {
         koTextEl.textContent = koText;
         lastKo = koText;
       }
-      if (enText !== lastEn) {
+      if (enText !== lastEn || renderEpoch !== lastEpoch) {
         enTextEl.textContent = enText;
+        enTextEl.lang = lang && !pending ? lang : 'en';
+        enTextEl.style.opacity = pending ? '0.7' : '1';
         lastEn = enText;
+      }
+      if (renderEpoch !== lastEpoch) {
+        lastEpoch = renderEpoch;
+        // 일본어 모드에서는 영어 표현 주석과 그 상태 표시를 숨긴다.
+        const annotationHost = document.getElementById('dual-sub-annotations');
+        if (annotationHost) annotationHost.style.display = lang ? 'none' : '';
+        if (betaBadgeEl) {
+          const badge = lang && translator ? betaBadgeText(translator.status()) : '';
+          betaBadgeEl.textContent = badge;
+          betaBadgeEl.style.display = badge ? 'block' : 'none';
+        }
       }
 
       const annotationCue = enCue ? enCue.startTime + ':' + enCue.endTime : '';
-      if (annotationCue !== lastAnnotationCue) {
+      if (lang) lastAnnotationCue = '';
+      if (!lang && annotationCue !== lastAnnotationCue) {
         lastAnnotationCue = annotationCue;
         annotationController?.update(globalThis.OTTDualSubsStudy?.buildContext(enCues, koCues, time));
       }
