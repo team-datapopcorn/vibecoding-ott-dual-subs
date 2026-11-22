@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OTT 이중자막 (Dual Subs)",
-  "version": "2.4.0",
-  "description": "쿠팡플레이·넷플릭스 한국어+영어 이중자막, 일본어 자막 무료 베타(영어 자막 AI 번역), 자막 옆 표현 주석.",
+  "version": "2.5.0",
+  "description": "쿠팡플레이·넷플릭스 한국어+영어 이중자막. 없는 영어·한국어 자막은 AI로 생성, 일본어 자막 무료 베타, 표현 주석.",
   "permissions": [
     "webRequest",
     "storage",
