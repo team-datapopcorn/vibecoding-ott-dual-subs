@@ -99,6 +99,8 @@ async function callGemini(env, src, lang, lines) {
   const text = (data.candidates?.[0]?.content?.parts || []).map((part) => part.text || '').join('');
   let out;
   try { out = JSON.parse(text); } catch { return { ok: false, code: 'UPSTREAM_PARSE' }; }
+  // 한 줄 요청에서 여러 줄로 나눠 오면 줄바꿈으로 합친다.
+  if (lines.length === 1 && Array.isArray(out) && out.length > 1 && out.every((item) => typeof item === 'string')) out = [out.join('\n')];
   if (!Array.isArray(out) || out.length !== lines.length || out.some((item) => typeof item !== 'string')) {
     return { ok: false, code: 'UPSTREAM_SHAPE' };
   }
@@ -108,6 +110,33 @@ async function callGemini(env, src, lang, lines) {
     inTokens: data.usageMetadata?.promptTokenCount || 0,
     outTokens: (data.usageMetadata?.candidatesTokenCount || 0) + (data.usageMetadata?.thoughtsTokenCount || 0),
   };
+}
+
+// 모델이 줄을 합치거나 나눠 개수가 어긋나면, 묶음을 반으로 나눠 다시 번역한다(최대 3단계).
+async function translateRobust(env, src, lang, lines, depth = 0) {
+  let result = await callGemini(env, src, lang, lines);
+  if (!result.ok && result.code !== 'UPSTREAM_400' && result.code !== 'UPSTREAM_SHAPE') result = await callGemini(env, src, lang, lines);
+  if (result.ok || result.code !== 'UPSTREAM_SHAPE' || lines.length === 1) return result;
+  if (lines.length <= 5 || depth >= 3) {
+    // 마지막 수단: 한 줄씩 번역
+    const parts = [];
+    let inTokens = 0;
+    let outTokens = 0;
+    for (const line of lines) {
+      const one = await callGemini(env, src, lang, [line]);
+      if (!one.ok) return one;
+      parts.push(one.lines[0]);
+      inTokens += one.inTokens;
+      outTokens += one.outTokens;
+    }
+    return { ok: true, lines: parts, inTokens, outTokens };
+  }
+  const mid = Math.ceil(lines.length / 2);
+  const left = await translateRobust(env, src, lang, lines.slice(0, mid), depth + 1);
+  if (!left.ok) return left;
+  const right = await translateRobust(env, src, lang, lines.slice(mid), depth + 1);
+  if (!right.ok) return right;
+  return { ok: true, lines: left.lines.concat(right.lines), inTokens: left.inTokens + right.inTokens, outTokens: left.outTokens + right.outTokens };
 }
 
 async function record(env, row) {
@@ -189,8 +218,7 @@ export default {
       return json({ ok: false, code: 'USER_LIMIT' }, 429, cors);
     }
 
-    let result = await callGemini(env, src, lang, lines);
-    if (!result.ok && result.code !== 'UPSTREAM_400') result = await callGemini(env, src, lang, lines);
+    const result = await translateRobust(env, src, lang, lines);
 
     const now = new Date().toISOString();
     const work = [record(env, {
