@@ -83,9 +83,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       dualSubToggle.checked = res.enabled;
       updatePreview(res.enabled);
       const tr = res.translation;
-      if (tr && tr.lang) {
-        const labels = { working: `일본어 번역 중 ${tr.done}/${tr.total}줄`, ready: `일본어 번역 완료 (${tr.total}줄)`, partial: `일부 번역 실패 (${tr.done}/${tr.total}줄), 나머지는 영어로 표시`, error: '번역 서버에 연결하지 못해 영어로 표시 중', limit: tr.code === 'USER_LIMIT' || tr.code === 'DAILY_LIMIT' ? '오늘 무료 번역 한도에 도달했어요. 내일 다시 이용할 수 있어요.' : '번역을 쓸 수 없어 영어로 표시 중' };
-        subLangStatus.textContent = labels[tr.state] || '';
+      const describe = (plan, st) => {
+        if (!plan || plan.kind !== 'ai' || !st || !st.lang) return '';
+        const name = plan.to === 'ja' ? '일본어' : plan.to === 'en' ? '영어' : '한국어';
+        const how = plan.to === 'ja' ? '번역' : '자막이 없어 AI로 생성';
+        if (st.state === 'working') return `${name} ${how} 중 ${st.done}/${st.total}줄`;
+        if (st.state === 'ready') return `${name} ${plan.to === 'ja' ? '번역' : 'AI 생성'} 완료 (${st.total}줄)`;
+        if (st.state === 'partial') return `${name} 일부 실패 (${st.done}/${st.total}줄)`;
+        if (st.state === 'error') return `${name}: 서버에 연결하지 못했어요`;
+        if (st.state === 'limit') return st.code === 'USER_LIMIT' || st.code === 'DAILY_LIMIT' ? '오늘 무료 AI 자막 한도에 도달했어요. 내일 다시 이용할 수 있어요.' : `${name}: AI 자막을 쓸 수 없어요`;
+        return '';
+      };
+      if (tr && tr.plan) {
+        subLangStatus.textContent = [describe(tr.plan.top, tr.top), describe(tr.plan.bottom, tr.bottom)].filter(Boolean).join(' · ');
       }
     });
   } catch {}

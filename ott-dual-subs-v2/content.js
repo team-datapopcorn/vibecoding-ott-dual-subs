@@ -64,22 +64,28 @@
     subLang: 'en', // 'en' = 영어 원문, 'ja' = 일본어 무료 베타(영어 자막을 AI 번역)
   };
 
-  // === 다른 언어 자막 무료 베타 ===
+  // === AI 자막 생성·번역 (무료 베타) ===
+  // 위 줄(영어/일본어)과 아래 줄(한국어) 중 OTT가 주지 않는 자막은 AI로 만들어 채운다.
   const betaApi = globalThis.OTTDualSubsTranslateBeta;
   let renderEpoch = 0;
   let betaBadgeEl = null;
-  const translator = betaApi
-    ? betaApi.createTranslator({
-        request: (message) => new Promise((resolve) => {
-          try {
-            chrome.runtime.sendMessage(message, (response) => {
-              resolve(chrome.runtime.lastError ? { ok: false, code: 'RUNTIME_ERROR' } : response);
-            });
-          } catch { resolve({ ok: false, code: 'RUNTIME_ERROR' }); }
-        }),
-        onChange: () => { renderEpoch += 1; },
-      })
-    : null;
+  let linePlan = { top: null, bottom: null };
+  const SINGLE_TRACK_WAIT_MS = 8000;
+  let singleTrackTimer = null;
+  let singleTrackReadyUrl = '';
+  let singleTrackExtended = false;
+
+  function betaRequest(message) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          resolve(chrome.runtime.lastError ? { ok: false, code: 'RUNTIME_ERROR' } : response);
+        });
+      } catch { resolve({ ok: false, code: 'RUNTIME_ERROR' }); }
+    });
+  }
+  const topTranslator = betaApi ? betaApi.createTranslator({ request: betaRequest, onChange: () => { renderEpoch += 1; } }) : null;
+  const bottomTranslator = betaApi ? betaApi.createTranslator({ request: betaRequest, onChange: () => { renderEpoch += 1; } }) : null;
 
   function betaLang() {
     return betaApi && betaApi.isBetaLang(settings.subLang) ? settings.subLang : '';
@@ -89,31 +95,112 @@
     return betaLang() === 'ja' ? '한국어+日本語' : '한국어+영어';
   }
 
-  function syncTranslation() {
+  function sourceCues(lang) {
+    return lang === 'ko' ? koCues : enCues;
+  }
+
+  function syncOne(translator, plan) {
     if (!translator) return;
-    const lang = betaLang();
     const current = translator.status();
-    if (!lang || !isEnabled || enCues.length === 0) {
+    if (!plan || plan.kind !== 'ai' || !isEnabled) {
       if (current.lang) { translator.stop(); renderEpoch += 1; }
       return;
     }
-    if (current.lang === lang && current.total === enCues.length) return;
-    annotationController?.clear();
-    translator.start(enCues, lang, () => (videoEl ? videoEl.currentTime : 0));
+    const cues = sourceCues(plan.from);
+    if (current.src === plan.from && current.lang === plan.to && current.total === cues.length) return;
+    translator.start(cues, plan.to, () => (videoEl ? videoEl.currentTime : 0), plan.from);
     renderEpoch += 1;
   }
 
-  function betaBadgeText(status) {
-    if (!status || !status.lang) return '';
-    const name = betaApi.LANGS[status.lang]?.label || status.lang;
-    if (status.state === 'working') return `${name} 베타 · AI 번역 중 ${status.done}/${status.total} (번역 전 줄은 영어로 표시)`;
+  function syncTranslation() {
+    linePlan = betaApi
+      ? betaApi.planLines({ koReal: koCues.length > 0, enReal: enCues.length > 0, subLang: settings.subLang })
+      : { top: enCues.length ? { kind: 'real', from: 'en' } : null, bottom: koCues.length ? { kind: 'real', from: 'ko' } : null };
+    if (!annotationsAllowed()) annotationController?.clear();
+    syncOne(topTranslator, linePlan.top);
+    syncOne(bottomTranslator, linePlan.bottom);
+    renderEpoch += 1;
+  }
+
+  // 영어 표현 주석은 실제 영어·한국어 자막이 모두 있고 위 줄이 영어 원문일 때만 쓴다.
+  function annotationsAllowed() {
+    return linePlan.top?.kind === 'real' && linePlan.bottom?.kind === 'real';
+  }
+
+  function aiStatusText(plan, status) {
+    if (!plan || plan.kind !== 'ai' || !status || !status.lang) return '';
+    const target = plan.to === 'ja' ? '日本語 베타' : plan.to === 'en' ? '영어 자막이 없어 AI로' : '한국어 자막이 없어 AI로';
+    const verb = plan.to === 'ja' ? '번역' : '만드는';
+    if (status.state === 'working') return plan.to === 'ja' ? `${target} · AI 번역 중 ${status.done}/${status.total}` : `${target} ${verb} 중 ${status.done}/${status.total}`;
     if (status.state === 'limit') {
       return status.code === 'USER_LIMIT' || status.code === 'DAILY_LIMIT'
-        ? `${name} 베타 · 오늘 무료 번역 한도에 도달해 남은 줄은 영어로 표시해요`
-        : `${name} 베타 · 번역을 쓸 수 없어 영어로 표시해요`;
+        ? '오늘 무료 AI 자막 한도에 도달했어요. 내일 다시 이용할 수 있어요'
+        : 'AI 자막을 쓸 수 없어요';
     }
-    if (status.state === 'error' || status.state === 'partial') return `${name} 베타 · 일부 번역 실패 (${status.done}/${status.total}), 나머지는 영어로 표시`;
+    if (status.state === 'error' || status.state === 'partial') return `AI 자막 일부 실패 (${status.done}/${status.total})`;
+    if (status.state === 'ready') return plan.to === 'ja' ? '' : 'AI 생성 자막';
     return '';
+  }
+
+  function betaBadgeText() {
+    const parts = [
+      aiStatusText(linePlan.top, topTranslator?.status()),
+      aiStatusText(linePlan.bottom, bottomTranslator?.status()),
+    ].filter(Boolean);
+    return [...new Set(parts)].join(' · ');
+  }
+
+  // 자막이 하나만 잡힐 때: 잠시 기다렸다가(두 번째 자막이 올 수 있으므로) 하나로도 켠다.
+  function listedTrackLangs() {
+    const out = new Set();
+    try {
+      for (const track of Array.from(videoEl?.textTracks || [])) {
+        const code = String(track.language || '').toLowerCase();
+        const label = String(track.label || '');
+        if (code.startsWith('en') || /english|영어/i.test(label)) out.add('en');
+        if (code.startsWith('ko') || /korean|한국어/i.test(label)) out.add('ko');
+      }
+    } catch {}
+    return out;
+  }
+
+  function wakeListedTracks() {
+    try {
+      for (const track of Array.from(videoEl?.textTracks || [])) {
+        const code = String(track.language || '').toLowerCase();
+        if ((code.startsWith('en') || code.startsWith('ko')) && track.mode === 'disabled') track.mode = 'hidden';
+      }
+    } catch {}
+  }
+
+  function hasEnoughTracks() {
+    return subtitleUrls.length >= 2 || (subtitleUrls.length === 1 && singleTrackReadyUrl === subtitleUrls[0]);
+  }
+
+  function markSingleTrackReady(reason) {
+    if (subtitleUrls.length !== 1) return;
+    singleTrackReadyUrl = subtitleUrls[0];
+    console.log(`[이중자막][${PLATFORM}] 자막 1개로 시작 (${reason}) — 없는 언어는 AI로 생성`);
+    if (isEnabled) reloadActiveSubtitles('single-track').catch(() => {});
+    else tryAutoEnable('single-track');
+  }
+
+  function scheduleSingleTrack() {
+    clearTimeout(singleTrackTimer);
+    if (subtitleUrls.length !== 1 || singleTrackReadyUrl === subtitleUrls[0]) return;
+    const url = subtitleUrls[0];
+    wakeListedTracks();
+    singleTrackTimer = setTimeout(() => {
+      if (subtitleUrls.length !== 1 || subtitleUrls[0] !== url) return;
+      // 플레이어 목록에 영어·한국어가 모두 있으면 한 번 더 기다린다(실제 자막이 더 정확하므로).
+      if (!singleTrackExtended && listedTrackLangs().size >= 2) {
+        singleTrackExtended = true;
+        wakeListedTracks();
+        scheduleSingleTrack();
+        return;
+      }
+      markSingleTrackReady('timeout');
+    }, SINGLE_TRACK_WAIT_MS);
   }
 
   // 저장된 설정과 "이중자막 켜 둠" 상태를 불러온다. 켜 둔 상태면 다음 편·새로고침에도 자동으로 켠다.
@@ -188,10 +275,14 @@
     if (message.type === 'GET_DUAL_SUB_STATUS') {
       sendResponse({
         enabled: isEnabled,
-        hasSubtitles: subtitleUrls.length >= 2,
+        hasSubtitles: hasEnoughTracks(),
         platform: PLATFORM,
         subLang: settings.subLang,
-        translation: translator ? translator.status() : null,
+        translation: {
+          plan: linePlan,
+          top: topTranslator ? topTranslator.status() : null,
+          bottom: bottomTranslator ? bottomTranslator.status() : null,
+        },
       });
       return true;
     }
@@ -334,7 +425,9 @@
   async function enableDualSubs() {
     isEnabled = true;
 
-    if (!(await ensureSubtitleSources())) {
+    // 사용자가 직접 켰는데 자막이 하나뿐이면 기다리지 않고 바로 시작한다.
+    if (!(await ensureSubtitleSources()) && subtitleUrls.length === 1) singleTrackReadyUrl = subtitleUrls[0];
+    if (!hasEnoughTracks()) {
       isEnabled = false;
       console.warn(`[이중자막][${PLATFORM}] 자막 2개 미만, 이중자막 불가`);
       return;
@@ -345,7 +438,7 @@
   }
 
   async function ensureSubtitleSources() {
-    if (subtitleUrls.length >= 2) {
+    if (hasEnoughTracks()) {
       return true;
     }
 
@@ -364,7 +457,7 @@
       }
     } catch {}
 
-    return subtitleUrls.length >= 2;
+    return hasEnoughTracks();
   }
 
   async function reloadActiveSubtitles(reason) {
@@ -376,7 +469,7 @@
   }
 
   async function loadCurrentSubtitleSet(reason) {
-    if (subtitleUrls.length < 2) return;
+    if (!hasEnoughTracks()) return;
 
     const requestId = ++loadRequestId;
 
@@ -397,6 +490,7 @@
       if (requestId !== loadRequestId || !isEnabled) return;
 
       console.log(`[이중자막] 로드 완료 (${reason}): 한국어 ${koCues.length}개, 영어 ${enCues.length}개`);
+      if (!koCues.length && !enCues.length) { isEnabled = false; return; }
 
       createOverlay();
       if (overlayEl) overlayEl.style.display = 'flex';
@@ -451,6 +545,8 @@
     subtitleUrls = update.sources.map((source) => source.url);
     subtitleFormats = update.sources.map((source) => source.format || 'vtt');
     subtitleSignature = update.signature;
+    if (subtitleUrls.length === 1) scheduleSingleTrack();
+    else clearTimeout(singleTrackTimer);
 
     if (update.changed) {
       console.log(`[이중자막][${PLATFORM}] 자막 세트 갱신 (${reason}): ${subtitleUrls.length}개`);
@@ -462,7 +558,9 @@
   function resetLoadedCues() {
     koCues = [];
     enCues = [];
-    if (translator) translator.stop();
+    topTranslator?.stop();
+    bottomTranslator?.stop();
+    linePlan = { top: null, bottom: null };
     renderEpoch += 1;
     clearOverlayText();
   }
@@ -479,6 +577,9 @@
     subtitleUrls = [];
     subtitleFormats = [];
     subtitleSignature = '';
+    clearTimeout(singleTrackTimer);
+    singleTrackReadyUrl = '';
+    singleTrackExtended = false;
     resetLoadedCues();
 
     if (overlayEl) {
@@ -532,15 +633,17 @@
   function assignLanguages(allCues) {
     koCues = [];
     enCues = [];
-
-    if (allCues.length >= 2) {
-      if (isKorean(allCues[0])) {
-        koCues = allCues[0];
-        enCues = allCues[1];
-      } else {
-        koCues = allCues[1];
-        enCues = allCues[0];
-      }
+    const detect = betaApi ? betaApi.detectLang : (cues) => (isKorean(cues) ? 'ko' : 'en');
+    const tagged = allCues.map((cues) => ({ cues, lang: detect(cues) })).filter((item) => item.cues.length > 0);
+    for (const item of tagged) {
+      if (item.lang === 'ko' && !koCues.length) koCues = item.cues;
+      else if (item.lang === 'en' && !enCues.length) enCues = item.cues;
+    }
+    // 언어를 못 가린 트랙은 예전처럼 남은 자리에 넣는다.
+    for (const item of tagged) {
+      if (item.cues === koCues || item.cues === enCues || item.lang === 'ja') continue;
+      if (!enCues.length && item.lang !== 'ko') enCues = item.cues;
+      else if (!koCues.length && item.lang !== 'en') koCues = item.cues;
     }
   }
 
@@ -657,11 +760,11 @@
   }
 
   function applySettings() {
-    if (betaLang()) annotationController?.clear();
-    else if (annotationController && videoEl) annotationController.update(globalThis.OTTDualSubsStudy?.buildContext(enCues, koCues, videoEl.currentTime));
     const dualOpt = document.getElementById('dual-sub-option');
     if (dualOpt) setInnerText(dualOpt, dualLabel());
-    syncTranslation();
+    if (isEnabled && (koCues.length || enCues.length)) syncTranslation();
+    if (!annotationsAllowed()) annotationController?.clear();
+    else if (annotationController && videoEl) annotationController.update(globalThis.OTTDualSubsStudy?.buildContext(enCues, koCues, videoEl.currentTime));
     renderEpoch += 1;
     if (enTextEl) {
       enTextEl.style.fontSize = settings.enFontSize + 'px';
@@ -687,12 +790,30 @@
   function startRendering() {
     if (animFrameId) cancelAnimationFrame(animFrameId);
 
-    let lastKo = '';
-    let lastEn = '';
+    let lastKo = null;
+    let lastEn = null;
     let lastAnnotationCue = '';
     let lastEpoch = -1;
-    let lastEnCue = null;
-    let lastEnIndex = -1;
+    const indexCache = { en: { cue: null, index: -1 }, ko: { cue: null, index: -1 } };
+
+    function cueIndex(lang, cue) {
+      const slot = indexCache[lang];
+      if (slot.cue !== cue) { slot.cue = cue; slot.index = cue ? sourceCues(lang).indexOf(cue) : -1; }
+      return slot.index;
+    }
+
+    // plan에 따라 한 줄의 글자와 상태를 만든다.
+    function lineText(plan, translator, time) {
+      if (!plan) return { text: '', lang: '', pending: false };
+      const cue = findActiveCue(sourceCues(plan.from), time);
+      if (!cue) return { text: '', lang: '', pending: false };
+      if (plan.kind === 'real') return { text: cue.text, lang: plan.from, pending: false };
+      const translated = translator?.textAt(cueIndex(plan.from, cue));
+      if (typeof translated === 'string' && translated) return { text: translated, lang: plan.to, pending: false };
+      // 번역 전: 영어 원문이 있으면 흐리게 먼저 보여 주고, 한국어 원문은 아래 줄과 겹치므로 비워 둔다.
+      if (plan.from === 'en' && plan.to !== 'ko') return { text: cue.text, lang: 'en', pending: true };
+      return { text: '', lang: '', pending: true };
+    }
 
     function render() {
       if (!videoEl || !overlayEl || !isEnabled) {
@@ -701,47 +822,43 @@
       }
 
       const time = videoEl.currentTime;
-      const koCue = findActiveCue(koCues, time);
-      const enCue = findActiveCue(enCues, time);
+      const top = lineText(linePlan.top, topTranslator, time);
+      const bottom = lineText(linePlan.bottom, bottomTranslator, time);
+      const epochChanged = renderEpoch !== lastEpoch;
 
-      const koText = koCue ? koCue.text : '';
-      let enText = enCue ? enCue.text : '';
-      const lang = betaLang();
-      let pending = false;
-      if (lang && enCue && translator) {
-        if (enCue !== lastEnCue) { lastEnCue = enCue; lastEnIndex = enCues.indexOf(enCue); }
-        const translated = translator.textAt(lastEnIndex);
-        if (typeof translated === 'string' && translated) enText = translated;
-        else pending = true;
+      if (bottom.text !== lastKo || epochChanged) {
+        koTextEl.textContent = bottom.text;
+        koTextEl.lang = bottom.lang || 'ko';
+        koTextEl.style.opacity = bottom.pending ? '0.7' : '1';
+        lastKo = bottom.text;
       }
-
-      if (koText !== lastKo) {
-        koTextEl.textContent = koText;
-        lastKo = koText;
+      if (top.text !== lastEn || epochChanged) {
+        enTextEl.textContent = top.text;
+        enTextEl.lang = top.lang || 'en';
+        enTextEl.style.opacity = top.pending ? '0.7' : '1';
+        lastEn = top.text;
       }
-      if (enText !== lastEn || renderEpoch !== lastEpoch) {
-        enTextEl.textContent = enText;
-        enTextEl.lang = lang && !pending ? lang : 'en';
-        enTextEl.style.opacity = pending ? '0.7' : '1';
-        lastEn = enText;
-      }
-      if (renderEpoch !== lastEpoch) {
+      if (epochChanged) {
         lastEpoch = renderEpoch;
-        // 일본어 모드에서는 영어 표현 주석과 그 상태 표시를 숨긴다.
+        // 영어 표현 주석은 실제 영어·한국어 자막이 있고 위 줄이 영어일 때만 보인다.
         const annotationHost = document.getElementById('dual-sub-annotations');
-        if (annotationHost) annotationHost.style.display = lang ? 'none' : '';
+        if (annotationHost) annotationHost.style.display = annotationsAllowed() ? '' : 'none';
         if (betaBadgeEl) {
-          const badge = lang && translator ? betaBadgeText(translator.status()) : '';
+          const badge = betaBadgeText();
           betaBadgeEl.textContent = badge;
           betaBadgeEl.style.display = badge ? 'block' : 'none';
         }
       }
 
-      const annotationCue = enCue ? enCue.startTime + ':' + enCue.endTime : '';
-      if (lang) lastAnnotationCue = '';
-      if (!lang && annotationCue !== lastAnnotationCue) {
-        lastAnnotationCue = annotationCue;
-        annotationController?.update(globalThis.OTTDualSubsStudy?.buildContext(enCues, koCues, time));
+      if (annotationsAllowed()) {
+        const enCue = findActiveCue(enCues, time);
+        const annotationCue = enCue ? enCue.startTime + ':' + enCue.endTime : '';
+        if (annotationCue !== lastAnnotationCue) {
+          lastAnnotationCue = annotationCue;
+          annotationController?.update(globalThis.OTTDualSubsStudy?.buildContext(enCues, koCues, time));
+        }
+      } else {
+        lastAnnotationCue = '';
       }
       animFrameId = requestAnimationFrame(render);
     }
@@ -807,7 +924,7 @@
       newVideo.__dualSubHooked = true;
       newVideo.addEventListener('playing', () => tryAutoEnable('playing'));
     }
-    if(autoEnable&&!isEnabled&&subtitleUrls.length<2)createWaitingIndicator();
+    if(autoEnable&&!isEnabled&&!hasEnoughTracks())createWaitingIndicator();
   });
   videoObserver.observe(document.body, { childList: true, subtree: true });
 

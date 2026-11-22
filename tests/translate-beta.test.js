@@ -14,10 +14,34 @@ function memoryStorage() {
   };
 }
 
-test('only Japanese is offered in the beta', () => {
+test('only Japanese is offered as a top-line choice; generation pairs are limited', () => {
   assert.equal(beta.isBetaLang('ja'), true);
   assert.equal(beta.isBetaLang('en'), false);
   assert.equal(beta.isBetaLang('es'), false);
+  assert.equal(beta.isPair('ko', 'en'), true);
+  assert.equal(beta.isPair('ko', 'ja'), true);
+  assert.equal(beta.isPair('en', 'ko'), true);
+  assert.equal(beta.isPair('ko', 'ko'), false);
+  assert.equal(beta.isPair('ja', 'en'), false);
+});
+
+test('Korean-only content gets AI English on top and real Korean below', () => {
+  assert.deepEqual(beta.planLines({ koReal: true, enReal: false, subLang: 'en' }), { top: { kind: 'ai', from: 'ko', to: 'en' }, bottom: { kind: 'real', from: 'ko' } });
+  assert.deepEqual(beta.planLines({ koReal: true, enReal: false, subLang: 'ja' }), { top: { kind: 'ai', from: 'ko', to: 'ja' }, bottom: { kind: 'real', from: 'ko' } });
+});
+
+test('English-only content gets AI Korean below; both real means no AI unless Japanese', () => {
+  assert.deepEqual(beta.planLines({ koReal: false, enReal: true, subLang: 'en' }), { top: { kind: 'real', from: 'en' }, bottom: { kind: 'ai', from: 'en', to: 'ko' } });
+  assert.deepEqual(beta.planLines({ koReal: true, enReal: true, subLang: 'en' }), { top: { kind: 'real', from: 'en' }, bottom: { kind: 'real', from: 'ko' } });
+  assert.deepEqual(beta.planLines({ koReal: true, enReal: true, subLang: 'ja' }).top, { kind: 'ai', from: 'en', to: 'ja' });
+  assert.deepEqual(beta.planLines({ koReal: false, enReal: false, subLang: 'en' }), { top: null, bottom: null });
+});
+
+test('detects subtitle language from cue text', () => {
+  assert.equal(beta.detectLang([{ text: '안녕하세요, 반갑습니다.' }]), 'ko');
+  assert.equal(beta.detectLang([{ text: 'Hello there, nice to meet you.' }]), 'en');
+  assert.equal(beta.detectLang([{ text: 'こんにちは、はじめまして。' }]), 'ja');
+  assert.equal(beta.detectLang([{ text: '♪' }]), '');
 });
 
 test('chunks cover every line once', () => {
@@ -38,6 +62,8 @@ test('cache keys depend on language and exact lines', () => {
   assert.notEqual(a, beta.cacheKey('ja', ['ab']));
   assert.notEqual(a, beta.cacheKey('ja', ['a', 'c']));
   assert.match(a, /^btc_ja_/);
+  assert.notEqual(a, beta.cacheKey('ja', ['a', 'b'], 'ko'));
+  assert.match(beta.cacheKey('en', ['a'], 'ko'), /^btc_koen_/);
 });
 
 test('translator fills lines and reports progress', async () => {
@@ -54,6 +80,16 @@ test('translator fills lines and reports progress', async () => {
   assert.equal(translator.status().done, 95);
   assert.equal(requests[0].lines[0], 'line 40');
   assert.ok(requests.every((r) => r.type === 'BETA_TRANSLATE' && r.lang === 'ja' && r.lines.length <= 40));
+});
+
+test('translator sends the source language for Korean-only generation', async () => {
+  const seen = [];
+  const translator = beta.createTranslator({ request: async (m) => { seen.push(m); return { ok: true, lines: m.lines.map(() => 'EN') }; } });
+  translator.start(cues.slice(0, 5), 'en', () => 0, 'ko');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(seen[0].src, 'ko');
+  assert.equal(seen[0].lang, 'en');
+  assert.equal(translator.status().state, 'ready');
 });
 
 test('translator stops at the daily limit and keeps English fallback', async () => {
@@ -88,7 +124,8 @@ test('service worker handler caches results and sends only lines, lang, version 
   assert.equal(second.cached, true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, beta.API_URL);
-  assert.deepEqual(Object.keys(calls[0].body).sort(), ['iid', 'lang', 'lines', 'v']);
+  assert.deepEqual(Object.keys(calls[0].body).sort(), ['iid', 'lang', 'lines', 'src', 'v']);
+  assert.equal(calls[0].body.src, 'en');
   assert.match(calls[0].body.iid, /^[0-9a-f-]{36}$/);
 });
 
